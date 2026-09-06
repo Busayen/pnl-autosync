@@ -3016,6 +3016,11 @@ if (typeof module !== 'undefined') module.exports = AN;
                inside a centred flex parent. So: strip shadows, and put the date and marks back
                into normal flow, pulling the marks up onto the date's line. */
             #cal-card * { box-shadow: none !important; text-shadow: none !important; }
+            /* The canvas is rectangular but the card is rounded, so html2canvas fills the corners
+               with a flat colour that does not match the card's gradient — the dark frame round
+               the edges. Square the card off for the capture so its own background covers the
+               whole canvas. */
+            #cal-card { border-radius: 0 !important; border: 0 !important; }
             .day { display: block !important; }
             .day .d { position: static !important; display: block !important; text-align: left; }
             .day .dots { position: static !important; text-align: right; white-space: nowrap;
