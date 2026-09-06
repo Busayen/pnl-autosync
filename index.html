@@ -4,13 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ledger — PnL Dashboard</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23134e3a%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230a2f22%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227.5%22%20fill%3D%22url%28%23g%29%22/%3E%3Cpath%20d%3D%22M6.5%2021.5%2012.5%2014%2017%2018%2025.5%208.5%22%20fill%3D%22none%22%20stroke%3D%22%235eead4%22%20stroke-width%3D%223.3%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3C/svg%3E">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Ledger">
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0a2f22">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23134e3a%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%230a2f22%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227.5%22%20fill%3D%22url%28%23g%29%22/%3E%3Cpath%20d%3D%22M6.5%2021.5%2012.5%2014%2017%2018%2025.5%208.5%22%20fill%3D%22none%22%20stroke%3D%22%235eead4%22%20stroke-width%3D%223.3%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ledger">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0a2f22">
+
   <meta name="description" content="Profit and loss dashboard: equity curve, heatmap calendar, risk and trend analytics, trade history. Runs entirely in your browser." />
   <style>
 :root {
@@ -779,7 +780,60 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .legend-dot, .chart .ct .t { letter-spacing: -0.005em; }
 .kv b .dim, .stat-row .k { color: var(--text-3); }
 .li b.num.profit, .li b.num.loss { font-weight: 600; }
-  </style>
+  
+/* ===== calendar: keep every detail on narrow screens ===== */
+.wk .ns { display: none; font-weight: 700; letter-spacing: -0.03em; }
+.wk .lbls { display: none; font-style: normal; }
+.wk .s i { font-style: normal; }
+
+@media (max-width: 860px) {
+  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(50px, 0.95fr) !important; gap: 4px; }
+  .cal .dow.week { display: block !important; }
+  .wk { display: flex !important; padding: 6px 4px; gap: 2px; }
+  .day { aspect-ratio: auto; min-height: 60px; padding: 5px 5px 4px; }
+  .day .d { font-size: 9.5px; }
+  .day .v { font-size: 11px; }
+  .day .c { display: block !important; font-size: 8.5px; margin-top: 0; }
+  .day .dots { display: flex !important; }
+  .wk .n { display: none; }
+  .wk .ns { display: block; font-size: 11.5px; }
+  .wk .wbar { display: block; }
+  .wk .s { flex-direction: column; gap: 0; font-size: 8.5px; line-height: 1.35; white-space: nowrap; }
+  .wk .lbl { display: none; }
+  .wk .lbls { display: inline; }
+}
+@media (max-width: 760px) {
+  .cal-wrap, .card-body:has(.cal) { padding: 8px; }
+  .cal { gap: 3px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(46px, 0.9fr) !important; }
+  .cal .dow { font-size: 9px; padding-bottom: 1px; }
+  .day { min-height: 54px; padding: 4px 4px 3px; border-radius: 5px; }
+  .day .d { font-size: 9px; }
+  .day .v { font-size: 10px; letter-spacing: -0.03em; }
+  .day .c { font-size: 8px; }
+  .day .dots i { width: 3px; height: 3px; }
+  .wk { padding: 5px 3px; border-radius: 5px; }
+  .wk .ns { font-size: 10.5px; }
+  .wk .s { font-size: 8px; }
+}
+@media (max-width: 560px) {
+  .day .v { display: none; }
+  .day .vs { display: block; font-size: 10px; letter-spacing: -0.03em; }
+}
+@media (max-width: 400px) {
+  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(42px, 0.85fr) !important; }
+  .day { min-height: 50px; }
+  .wk .ns { font-size: 10px; }
+}
+@media (max-width: 365px) {
+  .day .vs { font-size: 9px; }
+  .day .c { font-size: 7.5px; }
+  .day .dots { display: none !important; }
+  .wk .ns { font-size: 8.5px; }
+  .wk .s { font-size: 7.5px; }
+  .wk { padding: 5px 2px; }
+  .cal { gap: 2px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(44px, 0.95fr) !important; }
+}
+</style>
 <script>/*!
  * Chart.js v4.4.1
  * https://www.chartjs.org
@@ -2057,6 +2111,8 @@ if (typeof module !== 'undefined') module.exports = AN;
   const signed = (n, d = 2) => (n > 0 ? '+' : '') + money(n, d);
   const compact = n => { if (n === 0) return sym() + '0'; const a = Math.abs(n); const s = (n < 0 ? '−' : n > 0 ? '+' : '') + sym(); return a >= 1e6 ? s + (a / 1e6).toFixed(1) + 'M' : a >= 1e4 ? s + (a / 1e3).toFixed(1) + 'k' : a >= 1e3 ? s + (a / 1e3).toFixed(2) + 'k' : s + a.toFixed(a < 10 ? 2 : 0); };
   const pct = (n, d = 1) => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toFixed(d) + '%';
+  const compactTight = n => { if (!n) return sym() + '0'; const a = Math.abs(n), p = (n < 0 ? '−' : '+') + sym();
+    return a >= 1e6 ? p + (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? p + (a / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'k' : p + a.toFixed(0); };
   const fdate = (s, y = true) => { const [Y, M, Dd] = s.split('-').map(Number); return `${C.MON[M - 1]} ${Dd}${y ? `, ${Y}` : ''}`; };
   const ftime = ts => { const d = new Date(ts); return `${C.MON[d.getMonth()]} ${d.getDate()} ${C.pad2(d.getHours())}:${C.pad2(d.getMinutes())}`; };
   const fhold = m => m == null || isNaN(m) ? '—' : m < 60 ? `${Math.round(m)}m` : m < 1440 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
@@ -2273,12 +2329,12 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (!k) { h += '<div class="day pad"></div>'; continue; }
         const d = days.get(k), breach = d && deepDays.has(k);
         h += `<button class="day ${d ? 'has ' + (d.pnl > 0 ? 'p' : d.pnl < 0 ? 'l' : '') : ''} ${k === today ? 'today' : ''} ${k === S.selectedDay ? 'selected' : ''} ${breach ? 'breach' : ''}" data-day="${k}" ${d ? `style="${heat(d.pnl)}" ${breach ? `title="A session bottomed out here, down to ${money((D.risk.sessions.find(x => x.lowDate === k) || {}).worstBalance || 0, 2)}"` : ''}` : 'tabindex="-1"'}>
-          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? `<span class="dots">${'<i class="w"></i>'.repeat(d.wins)}${'<i class="l"></i>'.repeat(d.losses)}</span>` : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${(d.pnl > 0 ? '+' : d.pnl < 0 ? '−' : '') + Math.abs(d.pnl).toFixed(0)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
+          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? `<span class="dots">${'<i class="w"></i>'.repeat(d.wins)}${'<i class="l"></i>'.repeat(d.losses)}</span>` : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
       }
       // the week total always covers all seven days, whether or not weekends are shown
       let n = 0, tr = 0, wn = 0, l = 0, any = false;
       for (const w of order) { const k = dayAt(r, w); const d = k && days.get(k); if (d) { any = true; n += d.pnl; tr += d.trades; wn += d.wins; l += d.losses; } }
-      h += any ? `<div class="wk"><span class="n num ${cls(n)}">${signed(n)}</span><span class="wbar"><i style="width:${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%"></i></span><span class="s"><span><b>${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%</b> win</span><span><b>${tr}</b> ${tr === 1 ? 'trade' : 'trades'}</span></span></div>` : '<div class="wk blank"></div>';
+      h += any ? `<div class="wk"><span class="n num ${cls(n)}">${signed(n)}</span><span class="ns num ${cls(n)}">${compactTight(n)}</span><span class="wbar"><i style="width:${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%"></i></span><span class="s"><span><b>${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%</b><i class="lbl"> win</i></span><span><b>${tr}</b><i class="lbl"> ${tr === 1 ? 'trade' : 'trades'}</i><i class="lbls">t</i></span></span></div>` : '<div class="wk blank"></div>';
     }
     el.innerHTML = h;
     $('#cal-note').innerHTML = wantHide && weekendHere.length
@@ -2783,10 +2839,65 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (S.f.tag && !s.tags.includes(S.f.tag)) S.f.tag = '';
     applyActivity(); persist(); closeModals(); renderAll(); toast('Settings saved.');
   }
+  // html2canvas (1.4.1) predates CSS Color 4. Chrome resolves color-mix() to color(srgb ...),
+  // which makes it throw. Rather than patch elements one by one — which misses pseudo-elements
+  // and relies on the clone having the same node list — rewrite the stylesheet itself: every
+  // color-mix() expression is resolved to a concrete rgba() by asking the browser for it.
+  function toLegacyColor(v) {
+    return String(v).replace(/color\(\s*(?:srgb|display-p3|srgb-linear)\s+([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)(?:\s*\/\s*([-\d.eE]+%?))?\s*\)/g,
+      (_, r, g, b, a) => {
+        const to255 = x => Math.max(0, Math.min(255, Math.round(parseFloat(x) * 255)));
+        let alpha = a == null ? 1 : (String(a).endsWith('%') ? parseFloat(a) / 100 : parseFloat(a));
+        if (!isFinite(alpha)) alpha = 1;
+        return `rgba(${to255(r)}, ${to255(g)}, ${to255(b)}, ${alpha})`;
+      });
+  }
+  // Ask the live document to evaluate a colour expression, so var() and theme resolve correctly.
+  function resolveColorExpr(expr, probe) {
+    try {
+      probe.style.color = '';
+      probe.style.color = expr;
+      const out = getComputedStyle(probe).color;
+      if (!out || out.indexOf('color-mix') !== -1) return null;
+      return toLegacyColor(out);
+    } catch { return null; }
+  }
+  // Matches color-mix(...) including one level of nested parens, e.g. var(--x).
+  const COLOR_MIX_RE = /color-mix\((?:[^()]|\([^()]*\))*\)/g;
+  function deModernizeCss(css, probe) {
+    let out = css.replace(COLOR_MIX_RE, m => resolveColorExpr(m, probe) || 'rgba(0,0,0,0)');
+    if (out.indexOf('color(') !== -1) out = toLegacyColor(out);
+    return out;
+  }
+
   async function exportImage() {
     if (typeof html2canvas === 'undefined') { toast('Image export library failed to load.'); return; }
     const node = $('#cal-card'); const btn = $('#btn-image'); btn.disabled = true;
-    try { const canvas = await html2canvas(node, { backgroundColor: cssVar('--card'), scale: 2, useCORS: true, logging: false, ignoreElements: e => e.classList && e.classList.contains('no-export') }); const a = document.createElement('a'); a.download = 'pnl-calendar.png'; a.href = canvas.toDataURL('image/png'); a.click(); toast('Saved pnl-calendar.png'); } catch { toast('Could not render the image.'); }
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
+    document.body.appendChild(probe);
+    try {
+      const canvas = await html2canvas(node, {
+        backgroundColor: toLegacyColor(cssVar('--card')), scale: 2, useCORS: true, logging: false,
+        ignoreElements: e => e.classList && e.classList.contains('no-export'),
+        onclone: doc => {
+          doc.querySelectorAll('style').forEach(el => {
+            const css = el.textContent || '';
+            if (css.indexOf('color-mix(') !== -1 || css.indexOf('color(') !== -1) el.textContent = deModernizeCss(css, probe);
+          });
+          // inline styles set by the app (calendar heat shading) can carry modern colours too
+          doc.querySelectorAll('[style]').forEach(el => {
+            const v = el.getAttribute('style') || '';
+            if (v.indexOf('color-mix(') !== -1 || v.indexOf('color(') !== -1) el.setAttribute('style', deModernizeCss(v, probe));
+          });
+        },
+      });
+      const a = document.createElement('a'); a.download = 'pnl-calendar.png'; a.href = canvas.toDataURL('image/png'); a.click();
+      toast('Saved pnl-calendar.png');
+    } catch (e) {
+      toast(`Could not render the image: ${String(e && e.message || e)}`, 8000);
+    }
+    probe.remove();
     btn.disabled = false;
   }
   function exportSnapshot() {
