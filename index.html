@@ -654,6 +654,124 @@ body.ro .edit, body.ro .del, body.ro [data-act=image] { display: none !important
 #btn-sync.busy svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---------- v5 visual refresh (visual only) ---------- */
+:root { --border: rgba(255,255,255,0.07); --border-strong: rgba(255,255,255,0.14); --card: #121212; --radius: 10px; --profit-text: #34d399; --loss-text: #fb7185; --card-grad: linear-gradient(180deg, #161616, #111111); --card-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 24px rgba(0,0,0,.35); --elev-grad: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.015)); --elev-hi: inset 0 1px 0 rgba(255,255,255,.04); --day-bg: rgba(255,255,255,.025); --day-border: rgba(255,255,255,.06); }
+[data-theme="light"] { --border: rgba(0,0,0,0.07); --border-strong: rgba(0,0,0,0.14); --card: #f9f9f9; --profit-text: #059669; --loss-text: #e11d48; --card-grad: linear-gradient(180deg, #ffffff, #f7f7f7); --card-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06); --elev-grad: linear-gradient(180deg, rgba(0,0,0,.03), rgba(0,0,0,.01)); --elev-hi: inset 0 1px 0 #fff; --day-bg: rgba(0,0,0,.02); --day-border: rgba(0,0,0,.06); }
+body { background-image: radial-gradient(1100px 420px at 50% -120px, rgba(16,185,129,.09), transparent 70%); background-repeat: no-repeat; }
+.profit { color: var(--profit-text); } .loss { color: var(--loss-text); }
+.card { background: var(--card-grad); box-shadow: var(--card-shadow); }
+.nav { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.brand .mark { box-shadow: 0 0 0 1px rgba(16,185,129,.35), 0 4px 16px rgba(16,185,129,.35); }
+.btn { border-radius: 7px; }
+.btn.primary { background: linear-gradient(180deg, #ffffff, #e4e4e7); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.08); }
+.btn.primary:hover { background: linear-gradient(180deg, #ffffff, #d4d4d8); }
+[data-theme="light"] .btn.primary { background: linear-gradient(180deg, #27272a, #0a0a0a); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2), 0 0 0 1px rgba(0,0,0,.1); }
+[data-theme="light"] .btn.primary:hover { background: linear-gradient(180deg, #3f3f46, #18181b); }
+.tabs, .subnav { border-radius: 8px; background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.07); }
+.tabs { background: rgba(0,0,0,.35); border-color: rgba(255,255,255,.06); }
+.tab, .snav { border-radius: 6px; }
+.tab.active, .snav.active { background: linear-gradient(180deg, #1f1f1f, #171717); box-shadow: 0 1px 2px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06); }
+[data-theme="light"] .tabs, [data-theme="light"] .subnav { background: #f0f0f0; border-color: rgba(0,0,0,.06); }
+[data-theme="light"] .tab.active, [data-theme="light"] .snav.active { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08), inset 0 1px 0 #fff; }
+.filters .summary b { color: color-mix(in srgb, var(--text) 82%, var(--text-2)); }
+.select select { border-radius: 7px; background: rgba(255,255,255,.03); }
+[data-theme="light"] .select select { background: rgba(0,0,0,.02); }
+/* KPIs */
+.kpi .value { font-size: 30px; letter-spacing: -0.035em; }
+.kpi .value .sym { opacity: 1; color: var(--text-2); }
+.kpis .kpi:first-child { background: radial-gradient(260px 140px at 100% 100%, rgba(16,185,129,.16), transparent 70%), var(--card-grad); }
+.kpis .kpi:first-child .value.profit { text-shadow: 0 0 24px rgba(52,211,153,.35); }
+[data-theme="light"] .kpis .kpi:first-child .value.profit { text-shadow: none; }
+.kpi .delta { font-weight: 600; padding: 2px 7px; }
+.kpi .delta.up { box-shadow: inset 0 0 0 1px rgba(16,185,129,.25); } .kpi .delta.down { box-shadow: inset 0 0 0 1px rgba(225,29,72,.25); }
+.kpi .sub b { color: color-mix(in srgb, var(--text) 82%, var(--text-2)); } .kpi .sub b.profit, .kpi .sub b.loss { font-weight: 600; }
+.kpi .bar { height: 5px; gap: 2px; background: rgba(255,255,255,.05); } .kpi .bar i { border-radius: 999px; }
+.kpi .bar .w { background: linear-gradient(90deg, var(--profit), var(--profit-text)); } .kpi .bar .l { background: linear-gradient(90deg, var(--loss), var(--loss-text)); }
+[data-theme="light"] .kpi .bar { background: rgba(0,0,0,.06); }
+.ci { color: var(--text-2); padding: 0 6px; box-shadow: inset 0 0 0 1px var(--border); }
+.dd-label { text-transform: uppercase; letter-spacing: .04em; }
+/* calendar */
+.cal { gap: 8px; }
+.cal .dow { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding-bottom: 4px; }
+.cal .dow.week { padding-left: 14px; }
+.day { border-radius: 8px; padding: 9px 10px; justify-content: center; background: var(--day-bg); border-color: var(--day-border); overflow: hidden; }
+[data-theme="light"] .day { background: var(--day-bg); }
+.day.pad { background: transparent; border-color: transparent; }
+.day .d { position: absolute; top: 8px; left: 10px; color: var(--text-3); font-weight: 500; }
+.day.has .d { color: color-mix(in srgb, var(--text) 82%, var(--text-2)); font-weight: 600; }
+.day.has > span:last-child { display: flex; flex-direction: column; align-items: center; text-align: center; margin-top: 8px; }
+.day .v { font-size: 26px; letter-spacing: -0.035em; line-height: 1.1; }
+.day .vs { font-size: 15px; }
+.day .c { font-size: 12px; color: color-mix(in srgb, var(--text) 60%, transparent); font-weight: 500; margin-top: 2px; }
+.day.p { border-color: rgba(52,211,153,.35); } .day.l { border-color: rgba(251,113,133,.35); }
+.day.has::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(160deg, rgba(255,255,255,.07), transparent 55%); }
+[data-theme="light"] .day.has::after { background: linear-gradient(160deg, rgba(255,255,255,.7), transparent 55%); }
+.day.has:hover { box-shadow: 0 0 20px rgba(16,185,129,.18); } .day.l.has:hover { box-shadow: 0 0 20px rgba(225,29,72,.18); }
+.day .dots { position: absolute; top: 11px; right: 10px; display: flex; gap: 3px; }
+.day .dots i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+.day .dots i.w { background: var(--profit-text); box-shadow: 0 0 6px rgba(52,211,153,.7); } .day .dots i.l { background: var(--loss-text); box-shadow: 0 0 6px rgba(251,113,133,.7); }
+.wk { border-radius: 8px; background: var(--elev-grad); padding: 10px 14px; gap: 6px; box-shadow: var(--elev-hi); }
+[data-theme="light"] .wk { background: var(--elev-grad); }
+.wk.blank { background: transparent; box-shadow: none; }
+.wk .n { font-size: 16px; letter-spacing: -0.025em; }
+.wk .s { justify-content: space-between; white-space: nowrap; gap: 8px; } .wk .s b { color: color-mix(in srgb, var(--text) 82%, var(--text-2)); font-weight: 600; }
+.wk .wbar { display: flex; height: 3px; border-radius: 999px; overflow: hidden; background: rgba(251,113,133,.35); } .wk .wbar i { display: block; height: 100%; border-radius: 999px; background: var(--profit-text); }
+.cal-month-sum { gap: 12px; align-items: center; }
+.cal-month-sum .v { font-size: 17px; letter-spacing: -0.025em; }
+.cal-month-sum .k { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px var(--border); color: var(--text-2); }
+[data-theme="light"] .cal-month-sum .k { background: rgba(0,0,0,.03); }
+.legend i { border-radius: 3px; }
+.kbd { border-bottom-width: 2px; color: var(--text-2); background: rgba(255,255,255,.03); }
+[data-theme="light"] .kbd { background: rgba(0,0,0,.02); }
+/* performance / risk / trends / trades */
+.metrics { background: var(--border); }
+.metric .v { font-size: 21px; letter-spacing: -0.035em; } .metric .v.sm { font-size: 17px; }
+.score .val { font-size: 32px; letter-spacing: -0.045em; }
+.scale { box-shadow: inset 0 1px 1px rgba(0,0,0,.4); }
+.scale .pin { box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 14px rgba(255,255,255,.35); }
+[data-theme="light"] .scale .pin { box-shadow: 0 0 0 1px rgba(0,0,0,.2), 0 2px 8px rgba(0,0,0,.2); }
+.tile, .side-row, .mc-grid > div, .rv-grid > div { border-radius: 8px; background: var(--elev-grad); box-shadow: var(--elev-hi); }
+[data-theme="light"] .tile, [data-theme="light"] .side-row, [data-theme="light"] .mc-grid > div { background: var(--elev-grad); }
+.tile:has(.t.up) { background: linear-gradient(160deg, rgba(16,185,129,.08), rgba(255,255,255,.015) 60%); }
+.tile:has(.t.down) { background: linear-gradient(160deg, rgba(225,29,72,.08), rgba(255,255,255,.015) 60%); }
+.tile:has(.t.act) { background: linear-gradient(160deg, rgba(245,158,11,.08), rgba(255,255,255,.015) 60%); }
+.tile:has(.t.win) { background: linear-gradient(160deg, rgba(139,92,246,.08), rgba(255,255,255,.015) 60%); }
+.tile .d { font-size: 22px; letter-spacing: -0.035em; }
+.tile .pill { border-radius: 999px; }
+.tile .pill.p { box-shadow: inset 0 0 0 1px rgba(52,211,153,.3); } .tile .pill.l { box-shadow: inset 0 0 0 1px rgba(251,113,133,.3); }
+.side-row .bar { height: 5px; gap: 2px; } .side-row .bar i { border-radius: 999px; } .side-row .bar .w { background: linear-gradient(90deg, var(--profit), var(--profit-text)); } .side-row .bar .l { background: linear-gradient(90deg, var(--loss), var(--loss-text)); }
+.stat-row b { font-size: 18px; letter-spacing: -0.025em; }
+.notice { border-radius: 9px; padding: 14px 16px; gap: 12px; border-color: rgba(251,191,36,.28); background: linear-gradient(180deg, rgba(251,191,36,.10), rgba(251,191,36,.04)); box-shadow: inset 0 1px 0 rgba(251,191,36,.12); }
+.notice svg.i { color: #fbbf24; }
+.notice .btn { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.12); color: #fde68a; font-weight: 600; }
+[data-theme="light"] .notice .btn { color: #92400e; }
+th { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
+[data-theme="light"] tbody tr:nth-child(even) { background: rgba(0,0,0,.012); }
+.cons-row .cbar { box-shadow: inset 0 1px 1px rgba(0,0,0,.4); } .cons-row .cbar i { min-width: 6px; box-shadow: 0 0 8px rgba(52,211,153,.6); }
+.cmp-lbl { border-radius: 6px; } .cmp-lbl.a { box-shadow: inset 0 0 0 1px rgba(52,211,153,.3); } .cmp-lbl.b { box-shadow: inset 0 0 0 1px rgba(167,139,250,.3); }
+.tbl-tools input[type=search] { border-radius: 7px; box-shadow: inset 0 1px 2px rgba(0,0,0,.4); }
+[data-theme="light"] .tbl-tools input[type=search] { box-shadow: none; }
+/* v5: section details */
+.pnl-cell { padding-top: 8px; padding-bottom: 8px; }
+.pnl-pill { display: inline-block; min-width: 84px; text-align: right; padding: 3px 9px; border-radius: 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pnl-pill.profit { background: rgba(16,185,129,.12); box-shadow: inset 0 0 0 1px rgba(52,211,153,.2); }
+.pnl-pill.loss { background: rgba(225,29,72,.12); box-shadow: inset 0 0 0 1px rgba(251,113,133,.2); }
+.side.long::before { box-shadow: 0 0 6px rgba(52,211,153,.8); } .side.short::before { box-shadow: 0 0 6px rgba(251,113,133,.8); }
+.card-head > span[style*="font-weight:600"] { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px var(--border); font-size: 11.5px !important; }
+.card-head > span.loss[style*="font-weight:600"] { background: rgba(225,29,72,.12); box-shadow: inset 0 0 0 1px rgba(251,113,133,.25); }
+.card-head > span.profit[style*="font-weight:600"] { background: rgba(16,185,129,.12); box-shadow: inset 0 0 0 1px rgba(52,211,153,.25); }
+[data-theme="light"] .card-head > span[style*="font-weight:600"] { background: rgba(0,0,0,.03); }
+.card-head > span.dim[style*="font-weight:600"] { color: var(--text-2); }
+.r-empty { display: flex; gap: 16px; align-items: flex-start; color: var(--text-2) !important; }
+.r-empty b { color: var(--text); }
+.r-badge { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: rgba(255,255,255,.04); box-shadow: inset 0 0 0 1px var(--border); flex: none; font-weight: 700; font-size: 14px; color: var(--text-3); letter-spacing: -0.02em; }
+[data-theme="light"] .r-badge { background: rgba(0,0,0,.03); }
+.card-body.dim, .chart .ct .h { color: var(--text-3); }
+.card > .card-body.dim[style*="font-size:12px"] { color: var(--text-2); }
+.legend-dot, .chart .ct .t { letter-spacing: -0.005em; }
+.kv b .dim, .stat-row .k { color: var(--text-3); }
+.li b.num.profit, .li b.num.loss { font-weight: 600; }
   </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -2007,10 +2125,10 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function barChart(canvas, labels, values, o = {}) {
     if (!canvas || typeof Chart === 'undefined') return;
-    const p = cssVar('--profit'), l = cssVar('--loss'); const colors = o.colors || values.map(v => v >= 0 ? p : l);
+    const p = cssVar('--profit-text') || cssVar('--profit'), l = cssVar('--loss-text') || cssVar('--loss'); const colors = o.colors || values.map(v => v >= 0 ? p : l);
     const opts = baseOpts({ count: o.count, xTicks: o.xTicks, yFmt: o.yFmt, tooltip: { callbacks: { title: it => o.titles ? o.titles[it[0].dataIndex] : it[0].label, label: it => o.labelFn ? o.labelFn(it.dataIndex) : signed(it.parsed[o.horizontal ? 'x' : 'y']) } } });
     if (o.horizontal) { opts.indexAxis = 'y'; const y = opts.scales.y, x = opts.scales.x; opts.scales.x = { ...x, grid: { color: cssVar('--grid'), drawTicks: false }, border: { display: false }, ticks: { ...x.ticks, callback: v => compact(v).replace('+', '') } }; opts.scales.y = { ...y, grid: { display: false }, border: { display: false }, ticks: { ...y.ticks, callback: (v, i) => labels[i].length > 18 ? labels[i].slice(0, 16) + '…' : labels[i] } }; }
-    charts.push(new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 3, borderSkipped: false, maxBarThickness: 36, categoryPercentage: 0.7, barPercentage: 0.9 }] }, options: opts }));
+    charts.push(new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, borderSkipped: false, maxBarThickness: 36, categoryPercentage: 0.7, barPercentage: 0.9 }] }, options: opts }));
   }
   function lineChart(canvas, labels, datasets, o = {}) {
     if (!canvas || typeof Chart === 'undefined') return;
@@ -2148,12 +2266,12 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (!k) { h += '<div class="day pad"></div>'; continue; }
         const d = days.get(k), breach = d && deepDays.has(k);
         h += `<button class="day ${d ? 'has ' + (d.pnl > 0 ? 'p' : d.pnl < 0 ? 'l' : '') : ''} ${k === today ? 'today' : ''} ${k === S.selectedDay ? 'selected' : ''} ${breach ? 'breach' : ''}" data-day="${k}" ${d ? `style="${heat(d.pnl)}" ${breach ? `title="A session bottomed out here, down to ${money((D.risk.sessions.find(x => x.lowDate === k) || {}).worstBalance || 0, 2)}"` : ''}` : 'tabindex="-1"'}>
-          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${(d.pnl > 0 ? '+' : d.pnl < 0 ? '−' : '') + Math.abs(d.pnl).toFixed(0)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
+          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? `<span class="dots">${'<i class="w"></i>'.repeat(d.wins)}${'<i class="l"></i>'.repeat(d.losses)}</span>` : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${(d.pnl > 0 ? '+' : d.pnl < 0 ? '−' : '') + Math.abs(d.pnl).toFixed(0)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
       }
       // the week total always covers all seven days, whether or not weekends are shown
       let n = 0, tr = 0, wn = 0, l = 0, any = false;
       for (const w of order) { const k = dayAt(r, w); const d = k && days.get(k); if (d) { any = true; n += d.pnl; tr += d.trades; wn += d.wins; l += d.losses; } }
-      h += any ? `<div class="wk"><span class="n num ${cls(n)}">${signed(n)}</span><span class="s"><span><b>${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%</b> win</span><span><b>${tr}</b> ${tr === 1 ? 'trade' : 'trades'}</span></span></div>` : '<div class="wk blank"></div>';
+      h += any ? `<div class="wk"><span class="n num ${cls(n)}">${signed(n)}</span><span class="wbar"><i style="width:${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%"></i></span><span class="s"><span><b>${wn + l ? Math.round(wn / (wn + l) * 100) : 0}%</b> win</span><span><b>${tr}</b> ${tr === 1 ? 'trade' : 'trades'}</span></span></div>` : '<div class="wk blank"></div>';
     }
     el.innerHTML = h;
     $('#cal-note').innerHTML = wantHide && weekendHere.length
@@ -2313,7 +2431,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div class="cw"><canvas id="c-rdist"></canvas></div>
           ${rr.avgLoss !== 0 && Math.abs(rr.avgLoss + 1) < 0.05 ? `<div class="dim" style="font-size:11px;padding:4px 2px 8px">Your losses sit at exactly −1R, which is what stop discipline looks like when it holds.</div>` : ''}</div>`
       : `<div class="card"><div class="card-head"><div class="card-title">R-multiples<small>${S.activity ? 'No trades matched the activity file' : 'Needs an Activity History export'}</small></div><button class="btn sm" data-act="import">Import activity history</button></div>
-          <div class="card-body dim" style="font-size:12px">R measures each trade against what you risked, so a small win on a tight stop ranks above a large win on a wide one. IG's <b>Activity History</b> export carries the stop levels; import it alongside your transaction history and every metric here gains an R version.</div></div>`;
+          <div class="card-body dim r-empty" style="font-size:12px"><span class="r-badge">R</span><span>R measures each trade against what you risked, so a small win on a tight stop ranks above a large win on a wide one. IG's <b>Activity History</b> export carries the stop levels; import it alongside your transaction history and every metric here gains an R version.</span></div></div>`;
     // rejected orders
     const rej = (meta && meta.rejects) || [];
     const rejCard = rej.length
@@ -2442,7 +2560,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const total = rows.reduce((a, t) => a + t.pnl, 0); const multiAcc = accounts().length > 1;
     const tagCell = t => t.kind !== 'trade' ? '<td></td>' : RO ? `<td class="muted">${esc(t.tag || '')}</td>` : `<td><select class="tagsel" data-tag="${esc(t.id)}"><option value="">—</option>${tags.map(x => `<option value="${esc(x)}" ${t.tag === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>`;
     el.innerHTML = rows.length ? `<div class="tbl-wrap"><table><thead><tr>${th('date', 'Date')}<th>Time</th>${th('instrument', 'Symbol')}${multiAcc ? '<th>Account</th>' : ''}${th('side', 'Side')}${tags.length ? th('tag', 'Setup') : ''}${th('size', 'Size', true)}${th('hold', 'Hold', true)}${D.r && D.r.count ? th('r', 'R', true) : ''}${th('pnl', 'P&L', true)}<th class="act"></th></tr></thead><tbody>
-      ${shown.map(t => `<tr><td class="muted">${fdate(t.date, false)}</td><td class="muted num">${esc(t.time || '—')}</td><td class="sym">${esc(t.instrument || '—')}${t.kind === 'cost' ? '<span class="tag">fee</span>' : t.kind === 'cash' ? '<span class="tag">cash</span>' : ''}${t.reference && t.reference.startsWith('MANUAL-') ? '<span class="tag">manual</span>' : ''}${flagged.has(t.id) ? `<span class="flagx" title="Outlier vs your usual size or result">${I.warn}</span>` : ''}${capOver.has(t.id) ? `<span class="flagx over" title="Risked more than your per-trade cap for that session">${I.warn}</span>` : ''}</td>${multiAcc ? `<td class="muted">${esc(t.account || 'Main')}</td>` : ''}<td>${t.direction ? `<span class="side ${t.direction === 'BUY' ? 'long' : 'short'}">${t.direction === 'BUY' ? 'Long' : 'Short'}</span>` : '<span class="dim">—</span>'}</td>${tags.length ? tagCell(t) : ''}<td class="r num muted">${esc(t.size || '—')}</td><td class="r num muted">${fhold(C.holdMinutes(t))}</td>${D.r && D.r.count ? `<td class="r num ${t.risk > 0 ? cls(t.pnl) : 'dim'}" ${t.risk > 0 ? `title="risked ${money(t.risk)} · stop ${t.stop}${t.riskSource === 'amended' ? ' (adjusted after entry)' : ''}${t.lockedIn ? ' · later trailed past entry' : ''}"` : ''}>${t.risk > 0 ? (t.pnl / t.risk >= 0 ? '+' : '−') + Math.abs(t.pnl / t.risk).toFixed(2) + 'R' : '—'}</td>` : ''}<td class="r num ${cls(t.pnl)}" style="font-weight:600">${signed(t.pnl)}</td><td class="act r">${RO ? '' : `<button class="del" data-del="${esc(t.id)}" aria-label="Delete">${I.trash}</button>`}</td></tr>`).join('')}
+      ${shown.map(t => `<tr><td class="muted">${fdate(t.date, false)}</td><td class="muted num">${esc(t.time || '—')}</td><td class="sym">${esc(t.instrument || '—')}${t.kind === 'cost' ? '<span class="tag">fee</span>' : t.kind === 'cash' ? '<span class="tag">cash</span>' : ''}${t.reference && t.reference.startsWith('MANUAL-') ? '<span class="tag">manual</span>' : ''}${flagged.has(t.id) ? `<span class="flagx" title="Outlier vs your usual size or result">${I.warn}</span>` : ''}${capOver.has(t.id) ? `<span class="flagx over" title="Risked more than your per-trade cap for that session">${I.warn}</span>` : ''}</td>${multiAcc ? `<td class="muted">${esc(t.account || 'Main')}</td>` : ''}<td>${t.direction ? `<span class="side ${t.direction === 'BUY' ? 'long' : 'short'}">${t.direction === 'BUY' ? 'Long' : 'Short'}</span>` : '<span class="dim">—</span>'}</td>${tags.length ? tagCell(t) : ''}<td class="r num muted">${esc(t.size || '—')}</td><td class="r num muted">${fhold(C.holdMinutes(t))}</td>${D.r && D.r.count ? `<td class="r num ${t.risk > 0 ? cls(t.pnl) : 'dim'}" ${t.risk > 0 ? `title="risked ${money(t.risk)} · stop ${t.stop}${t.riskSource === 'amended' ? ' (adjusted after entry)' : ''}${t.lockedIn ? ' · later trailed past entry' : ''}"` : ''}>${t.risk > 0 ? (t.pnl / t.risk >= 0 ? '+' : '−') + Math.abs(t.pnl / t.risk).toFixed(2) + 'R' : '—'}</td>` : ''}<td class="r num pnl-cell"><span class="pnl-pill ${cls(t.pnl)}">${signed(t.pnl)}</span></td><td class="act r">${RO ? '' : `<button class="del" data-del="${esc(t.id)}" aria-label="Delete">${I.trash}</button>`}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="tbl-foot"><span>${shown.length < rows.length ? `Showing ${shown.length} of ${rows.length}` : plural(rows.length, 'row')} · net <b class="${cls(total)}">${signed(total)}</b></span><span style="display:flex;gap:6px">${rows.length > 40 ? `<button class="btn ghost sm" data-act="toggle-all">${S.showAll ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}<button class="btn ghost sm" data-act="export-rows">${I.download}Export these rows</button></span></div>`
       : `<div class="empty">No trades match.</div>`;
