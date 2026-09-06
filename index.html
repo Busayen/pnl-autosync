@@ -836,6 +836,11 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 
 .overlay.imgsheet .modal { max-width: 560px; }
 .overlay.imgsheet .modal-body { padding: 4px 16px 16px; }
+
+/* the active section pill takes its background from the restyle, so the label must use --text,
+   not --accent-text, or it lands black-on-dark and white-on-white */
+.snav.active, .tab.active { color: var(--text); }
+[data-theme="light"] .snav.active, [data-theme="light"] .tab.active { color: var(--text); }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -2933,6 +2938,24 @@ if (typeof module !== 'undefined') module.exports = AN;
             const css = el.textContent || '';
             if (css.indexOf('color-mix(') !== -1 || css.indexOf('color(') !== -1) el.textContent = deModernizeCss(css, probe);
           });
+
+          // html2canvas has weak flexbox support and renders inset box-shadow as a filled block —
+          // that is the stray white square on today's date. Neutralise both for the capture only.
+          const fix = doc.createElement('style');
+          fix.textContent = `
+            .day, .wk { display: block !important; }
+            .day .dots { display: block !important; line-height: 0; margin-bottom: 2px; }
+            .day .dots i { display: inline-block !important; }
+            .wk .s { display: block !important; }
+            .day > span { display: block; }
+            .wk > span { display: block; }
+            .wk .s > span { display: block; }
+            .wk .wbar { display: block; }
+            .day.today { box-shadow: none !important; border: 1.5px solid var(--text) !important; }
+            .day.selected { box-shadow: none !important; }
+            .day .v, .day .vs, .day .c, .wk .n, .wk .ns { overflow: visible !important; }
+          `;
+          doc.head.appendChild(fix);
           // inline styles set by the app (calendar heat shading) can carry modern colours too
           doc.querySelectorAll('[style]').forEach(el => {
             const v = el.getAttribute('style') || '';
