@@ -787,7 +787,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .wk .s i { font-style: normal; }
 
 @media (max-width: 860px) {
-  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(50px, 0.95fr) !important; gap: 4px; }
+  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(70px, 1.35fr) !important; gap: 4px; }
   .cal .dow.week { display: block !important; }
   .wk { display: flex !important; padding: 6px 4px; gap: 2px; }
   .day { aspect-ratio: auto; min-height: 60px; padding: 5px 5px 4px; }
@@ -799,12 +799,12 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .wk .ns { display: block; font-size: 11.5px; }
   .wk .wbar { display: block; }
   .wk .s { flex-direction: column; gap: 0; font-size: 8.5px; line-height: 1.35; white-space: nowrap; }
-  .wk .lbl { display: none; }
-  .wk .lbls { display: inline; }
+  .wk .lbl { display: inline; }
+  .wk .lbls { display: none; }
 }
 @media (max-width: 760px) {
   .cal-wrap, .card-body:has(.cal) { padding: 8px; }
-  .cal { gap: 3px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(46px, 0.9fr) !important; }
+  .cal { gap: 3px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(66px, 1.3fr) !important; }
   .cal .dow { font-size: 9px; padding-bottom: 1px; }
   .day { min-height: 54px; padding: 4px 4px 3px; border-radius: 5px; }
   .day .d { font-size: 9px; }
@@ -820,7 +820,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .day .vs { display: block; font-size: 10px; letter-spacing: -0.03em; }
 }
 @media (max-width: 400px) {
-  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(42px, 0.85fr) !important; }
+  .cal { grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(62px, 1.25fr) !important; }
   .day { min-height: 50px; }
   .wk .ns { font-size: 10px; }
 }
@@ -831,7 +831,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .wk .ns { font-size: 8.5px; }
   .wk .s { font-size: 7.5px; }
   .wk { padding: 5px 2px; }
-  .cal { gap: 2px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(44px, 0.95fr) !important; }
+  .cal { gap: 2px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(56px, 1.15fr) !important; }
 }
 
 .overlay.imgsheet .modal { max-width: 560px; }
@@ -841,6 +841,43 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
    not --accent-text, or it lands black-on-dark and white-on-white */
 .snav.active, .tab.active { color: var(--text); }
 [data-theme="light"] .snav.active, [data-theme="light"] .tab.active { color: var(--text); }
+
+/* week rail: full words, each metric on its own line */
+@media (max-width: 860px) {
+  .wk .s > span { display: block; line-height: 1.25; }
+  .wk .s b { margin-right: 3px; }
+  .wk .lbl { color: var(--text-3); }
+}
+
+/* day cell trade marks: dots on wide screens, a win-rate bar when space is tight */
+.day .dots { max-width: 58%; overflow: hidden; flex-wrap: nowrap; }
+.day .dbar { display: none; }
+@media (max-width: 560px) {
+  .day .dots { display: none !important; }
+  .day .dbar {
+    display: block; position: absolute; top: 7px; right: 6px; width: 38%; height: 3px;
+    border-radius: 999px; overflow: hidden; background: var(--loss-text, #e11d48);
+  }
+  .day .dbar i { display: block; height: 100%; background: var(--profit-text, #10b981); border-radius: 999px; }
+}
+
+/* Above the mobile breakpoints the day value was a fixed 26px regardless of how many columns
+   the calendar had. With weekends shown that is 8 columns and ~81px cells, so long values
+   like +S$12.8M overflowed and pushed the trade count out. Scale with the column count. */
+@media (min-width: 861px) {
+  .cal[data-cols="7"] .day .v { font-size: clamp(10px, 1.25vw, 22px); }
+  .cal[data-cols="5"] .day .v { font-size: clamp(11px, 1.75vw, 26px); }
+  .cal[data-cols="7"] .day .c { font-size: clamp(9px, 0.75vw, 12px); }
+  .cal[data-cols="7"] .day .d { font-size: clamp(9px, 0.8vw, 12px); }
+}
+.day .v, .day .vs { max-width: 100%; }
+.day > span:last-child { min-width: 0; }
+
+/* auto-hiding header */
+.nav { transition: transform .28s cubic-bezier(.4,0,.2,1); will-change: transform; }
+.nav.nav-hidden { transform: translateY(-100%); }
+@media (prefers-reduced-motion: reduce) { .nav { transition: none; } }
+@media print { .nav.nav-hidden { transform: none; } }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -2307,6 +2344,27 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Weekend rows are rare but real (Sunday index opens, crypto). Never hide data silently:
   // if any fall in the visible month, the toggle is overridden and the calendar says why.
   function weekendRows(rows) { return rows.filter(t => C.weekday(t.date) >= 5); }
+
+  // One dot per trade stops working past a handful: 20 trades rendered 117px of dots into a
+  // 53px cell, and even 10 dots ran into the date. Above MAX the strip becomes proportional
+  // rather than a count; narrow screens get a win-rate bar, which scales to any trade count.
+  function dayMarks(d) {
+    const wins = d.wins || 0, losses = d.losses || 0, total = wins + losses;
+    if (!total) return '';
+    const MAX = 5;
+    let dots;
+    if (total <= MAX) dots = '<i class="w"></i>'.repeat(wins) + '<i class="l"></i>'.repeat(losses);
+    else {
+      let w = wins ? Math.max(1, Math.round(wins / total * MAX)) : 0;
+      if (losses && w === MAX) w = MAX - 1;
+      dots = '<i class="w"></i>'.repeat(w) + '<i class="l"></i>'.repeat(MAX - w);
+    }
+    const pct = (wins / total * 100).toFixed(0);
+    const t = `${wins} won, ${losses} lost`;
+    return `<span class="dots${total > MAX ? ' prop' : ''}" title="${t}">${dots}</span>` +
+           `<span class="dbar" title="${t}"><i style="width:${pct}%"></i></span>`;
+  }
+
   function renderCal() {
     const el = $('#cal'); if (!S.trades.length) return;
     const base = baseTrades(); const days = C.byDay(base); const { y, m } = S.cal;
@@ -2318,6 +2376,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const hide = wantHide && weekendHere.length === 0;
     const visible = hide ? order.filter(w => w < 5) : order;
     el.style.setProperty('--cols', visible.length);
+    el.dataset.cols = visible.length;
     const dim = new Date(y, m + 1, 0).getDate();
     const lead = order.indexOf(C.weekday(C.iso(y, m + 1, 1)));
     const weeks = Math.floor((lead + dim - 1) / 7) + 1;
@@ -2337,7 +2396,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (!k) { h += '<div class="day pad"></div>'; continue; }
         const d = days.get(k), breach = d && deepDays.has(k);
         h += `<button class="day ${d ? 'has ' + (d.pnl > 0 ? 'p' : d.pnl < 0 ? 'l' : '') : ''} ${k === today ? 'today' : ''} ${k === S.selectedDay ? 'selected' : ''} ${breach ? 'breach' : ''}" data-day="${k}" ${d ? `style="${heat(d.pnl)}" ${breach ? `title="A session bottomed out here, down to ${money((D.risk.sessions.find(x => x.lowDate === k) || {}).worstBalance || 0, 2)}"` : ''}` : 'tabindex="-1"'}>
-          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? `<span class="dots">${'<i class="w"></i>'.repeat(d.wins)}${'<i class="l"></i>'.repeat(d.losses)}</span>` : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
+          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? dayMarks(d) : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
       }
       // the week total always covers all seven days, whether or not weekends are shown
       let n = 0, tr = 0, wn = 0, l = 0, any = false;
@@ -2941,18 +3000,42 @@ if (typeof module !== 'undefined') module.exports = AN;
 
           // html2canvas has weak flexbox support and renders inset box-shadow as a filled block —
           // that is the stray white square on today's date. Neutralise both for the capture only.
+          // <button> centres its content vertically no matter what display is set, which puts
+          // the date in the middle of empty cells. Swap them for divs in the clone.
+          doc.querySelectorAll('button.day').forEach(btn => {
+            const div = doc.createElement('div');
+            div.className = btn.className;
+            if (btn.getAttribute('style')) div.setAttribute('style', btn.getAttribute('style'));
+            div.innerHTML = btn.innerHTML;
+            btn.replaceWith(div);
+          });
           const fix = doc.createElement('style');
           fix.textContent = `
-            .day, .wk { display: block !important; }
-            .day .dots { display: block !important; line-height: 0; margin-bottom: 2px; }
-            .day .dots i { display: inline-block !important; }
-            .wk .s { display: block !important; }
-            .day > span { display: block; }
+            /* Two separate html2canvas limits: it renders box-shadows as hard rectangles (the
+               black frames round the week cells) and it mislays absolutely positioned children
+               inside a centred flex parent. So: strip shadows, and put the date and marks back
+               into normal flow, pulling the marks up onto the date's line. */
+            #cal-card * { box-shadow: none !important; text-shadow: none !important; }
+            .day { display: block !important; }
+            .day .d { position: static !important; display: block !important; text-align: left; }
+            .day .dots { position: static !important; text-align: right; white-space: nowrap;
+                         margin-top: -1.15em; margin-bottom: 2px; max-width: 100%; }
+            .day .dots i { display: inline-block !important; margin-left: 3px; }
+            .day .dbar { position: static !important; width: 38%; margin: -0.9em 0 3px auto; }
+            /* keep the same dots-vs-bar split the live page uses at this width */
+            @media (min-width: 561px) { .day .dots { display: block !important; } .day .dbar { display: none !important; } }
+            @media (max-width: 560px) { .day .dots { display: none !important; } .day .dbar { display: block !important; } }
+            .day.has > span:last-child { display: block !important; text-align: center; margin-top: 1px; }
+            .day.has::after { display: none !important; }
+            .wk { display: block !important; }
             .wk > span { display: block; }
+            .wk .s { display: block !important; }
             .wk .s > span { display: block; }
             .wk .wbar { display: block; }
-            .day.today { box-shadow: none !important; border: 1.5px solid var(--text) !important; }
-            .day.selected { box-shadow: none !important; }
+            /* No "today" or "selected" marker belongs in an exported image. */
+            .day.today, .day.selected { border: 1px solid var(--border) !important; }
+            .day.today.p, .day.selected.p { border-color: rgba(52,211,153,.35) !important; }
+            .day.today.l, .day.selected.l { border-color: rgba(251,113,133,.35) !important; }
             .day .v, .day .vs, .day .c, .wk .n, .wk .ns { overflow: visible !important; }
           `;
           doc.head.appendChild(fix);
@@ -3058,6 +3141,19 @@ if (typeof module !== 'undefined') module.exports = AN;
   const totop = $('#totop');
   totop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
   let st; window.addEventListener('scroll', () => { clearTimeout(st); st = setTimeout(() => totop.classList.toggle('show', window.scrollY > 600), 60); }, { passive: true });
+  // Header hides once you scroll past the top and only comes back when you return to the top.
+  (() => {
+    const nav = document.querySelector('.nav');
+    if (!nav) return;
+    let ticking = false;
+    const REVEAL_AT = 70;   // treat anything in this band as "at the top"
+    const update = () => {
+      ticking = false;
+      if (document.querySelector('.overlay.open')) return;   // never hide behind a modal
+      nav.classList.toggle('nav-hidden', Math.max(0, window.scrollY) > REVEAL_AT);
+    };
+    window.addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } }, { passive: true });
+  })();
   // keep the active section tab in view when it changes
   const scrollNavIntoView = () => { const a = $('#subnav .snav.active'); if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); };
   let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => charts.forEach(c => c.resize()), 120); });
