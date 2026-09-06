@@ -833,6 +833,9 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .wk { padding: 5px 2px; }
   .cal { gap: 2px; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) minmax(44px, 0.95fr) !important; }
 }
+
+.overlay.imgsheet .modal { max-width: 560px; }
+.overlay.imgsheet .modal-body { padding: 4px 16px 16px; }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -2839,6 +2842,51 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (S.f.tag && !s.tags.includes(S.f.tag)) S.f.tag = '';
     applyActivity(); persist(); closeModals(); renderAll(); toast('Settings saved.');
   }
+
+  // iOS Safari does not reliably honour <a download>, and inside a home-screen web app it is
+  // worse. So: desktop gets a direct download; touch devices get the image on screen with a
+  // Share button, which is the only dependable route into Photos. The button matters — calling
+  // navigator.share from a fresh tap keeps the user-activation that html2canvas's await consumes.
+  const isTouchIOS = () => /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+    (navigator.maxTouchPoints > 0 && !matchMedia('(hover: hover)').matches);
+
+  function showImageSheet(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay open imgsheet';
+    wrap.innerHTML = `<div class="modal" role="dialog" aria-label="Calendar image">
+        <div class="modal-head"><div><h3>Calendar image</h3><p>Tap Save to send it to Photos, or press and hold the image.</p></div>
+          <button class="btn ghost icon sm" data-close aria-label="Close"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+        <div class="modal-body"><img src="${url}" alt="PnL calendar" style="width:100%;height:auto;border-radius:8px;border:1px solid var(--border)"></div>
+        <div class="modal-foot"><button class="btn ghost" data-close>Close</button><div class="right"><button class="btn primary" data-save>Save image</button></div></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const close = () => { wrap.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000); };
+    wrap.addEventListener('click', async e => {
+      if (e.target === wrap || e.target.closest('[data-close]')) return close();
+      if (!e.target.closest('[data-save]')) return;
+      const file = new File([blob], filename, { type: 'image/png' });
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); close(); return; }
+      } catch (err) { if (err && err.name === 'AbortError') return; }
+      const a = document.createElement('a'); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('If nothing downloaded, press and hold the image and choose Add to Photos.', 7000);
+    });
+  }
+
+  async function deliverImage(canvas, filename) {
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    if (!blob) throw new Error('could not encode the image');
+    if (isTouchIOS()) { showImageSheet(blob, filename); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast('Saved ' + filename);
+  }
+
   // html2canvas (1.4.1) predates CSS Color 4. Chrome resolves color-mix() to color(srgb ...),
   // which makes it throw. Rather than patch elements one by one — which misses pseudo-elements
   // and relies on the clone having the same node list — rewrite the stylesheet itself: every
@@ -2892,8 +2940,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           });
         },
       });
-      const a = document.createElement('a'); a.download = 'pnl-calendar.png'; a.href = canvas.toDataURL('image/png'); a.click();
-      toast('Saved pnl-calendar.png');
+      await deliverImage(canvas, 'pnl-calendar.png');
     } catch (e) {
       toast(`Could not render the image: ${String(e && e.message || e)}`, 8000);
     }
