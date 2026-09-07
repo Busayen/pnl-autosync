@@ -69,7 +69,6 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
 .brand .mark { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, var(--profit), var(--profit-text)); display: grid; place-items: center; }
 .brand .mark svg { width: 14px; height: 14px; stroke: #062b1f; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.brand .status { font-weight: 400; color: var(--text-3); font-size: 12px; margin-left: 6px; }
 .nav-actions { display: flex; align-items: center; gap: 8px; }
 
 .btn {
@@ -297,7 +296,6 @@ textarea.paste::placeholder { color: var(--text-3); }
   .nav { padding: 0 16px; } .page { padding: 16px 16px 48px; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi .value { font-size: 20px; } .kpi .value .sym { font-size: 14px; } .kpi .spark { width: 40%; height: 40px; }
   .nav .btn .t { display: none; } .nav .btn { width: 32px; padding: 0; justify-content: center; } .nav-actions { gap: 4px; }
-  .brand .status { display: none; }
   .day { padding: 5px 6px; } .day .v { display: none; } .day .vs { display: block; } .kpi:last-child { grid-column: 1 / -1; }
   .form { grid-template-columns: 1fr; }
   .tbl-tools input[type=search] { width: 150px; }
@@ -935,6 +933,36 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .btn.danger-solid:disabled { opacity: .5; }
 .closebtn { color: var(--text-3); }
 .closebtn:hover { color: var(--loss); border-color: var(--loss); }
+
+/* Sub-navigation on phones: two rows of three, so every tab keeps its full word. Squeezing
+   six onto one line meant abbreviating to "Over" and "Perf", which read as truncation. */
+.lbl-short { display: none; }
+@media (max-width: 760px) {
+  .subnav {
+    margin: 0; padding: 0 0 8px; overflow: visible; width: 100%; background: none; border: 0;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;
+  }
+  .snav {
+    min-width: 0; padding: 0 6px; font-size: 12px; height: 32px; text-align: center;
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 7px;
+  }
+  [data-theme="light"] .snav { background: #f4f4f4; }
+  .snav.active { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+  [data-theme="light"] .snav.active { background: var(--accent); color: var(--accent-text); }
+}
+@media (max-width: 360px) { .snav { font-size: 11px; padding: 0 3px; } .subnav { gap: 4px; } }
+
+/* Grid items default to min-width:auto, so a wide table stretches the grid instead of
+   scrolling inside its wrapper. */
+.two > *, .charts > *, .edge-row > * { min-width: 0; }
+.two .tbl-wrap, .charts .tbl-wrap { min-width: 0; max-width: 100%; }
+
+/* Between the phone layout and a wide desktop there is a band where the brand, six tabs and
+   five labelled buttons do not fit on one line. Collapse the buttons to icons there. */
+@media (min-width: 761px) and (max-width: 1179px) {
+  .nav-actions .btn .t { display: none; }
+  .nav-actions .btn { padding: 0 9px; gap: 0; }
+}
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -975,7 +1003,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 <body>
   <div class="ro-banner hidden" id="ro-banner"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span></span></div>
   <header class="nav">
-    <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></span>Ledger<span class="status" id="brand-status"></span></div>
+    <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></span>Ledger</div>
     <nav class="subnav" id="subnav"></nav>
     <div class="nav-actions">
       <button class="btn ghost icon" data-act="cmd" title="Command palette (⌘K)" aria-label="Command palette"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg></button>
@@ -1021,7 +1049,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
             <div class="cal-tools"><div class="cal-month-sum" id="cal-sum"></div><button class="btn icon sm no-export" id="btn-image" data-act="image" title="Export as image" aria-label="Export calendar as image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button></div>
           </div>
           <div class="card-body"><div class="cal" id="cal"></div><div id="cal-note"></div></div>
-          <div class="legend"><span><i style="background:var(--profit-soft);border:1px solid rgba(16,185,129,.4)"></i>Profit</span><span><i style="background:var(--loss-soft);border:1px solid rgba(225,29,72,.4)"></i>Loss</span><span><i style="border:1px solid var(--border)"></i>No trades</span><span><i style="border:1px dashed var(--loss)"></i>Session low point</span><span style="margin-left:auto" class="no-export">Click a day for its trades · <span class="kbd">←</span> <span class="kbd">→</span> month · <span class="kbd">1</span>–<span class="kbd">5</span> sections · <span class="kbd">⌘K</span></span></div>
+          <div class="legend"><span><i style="background:var(--profit-soft);border:1px solid rgba(16,185,129,.4)"></i>Profit</span><span><i style="background:var(--loss-soft);border:1px solid rgba(225,29,72,.4)"></i>Loss</span><span><i style="border:1px solid var(--border)"></i>No trades</span><span><i style="border:1px dashed var(--loss)"></i>Session low point</span><span style="margin-left:auto" class="no-export">Click a day for its trades · <span class="kbd">←</span> <span class="kbd">→</span> month · <span class="kbd">1</span>–<span class="kbd">6</span> sections · <span class="kbd">⌘K</span></span></div>
         </section>
       </div>
 
@@ -2195,7 +2223,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const CUR = { GBP: '£', USD: '$', EUR: '€', SGD: 'S$', AUD: 'A$', NZD: 'NZ$', CAD: 'C$', HKD: 'HK$', JPY: '¥', CHF: 'CHF ', ZAR: 'R', INR: '₹' };
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const TFS = [['intraday', 'Intraday'], ['2d', '2D'], ['3d', '3D'], ['5d', '5D'], ['7d', '7D'], ['1m', '1M'], ['3m', '3M'], ['ytd', 'YTD'], ['all', 'All'], ['custom', 'Custom']];
-  const SECTIONS = [['overview', 'Overview'], ['performance', 'Performance'], ['risk', 'Risk'], ['trends', 'Trends'], ['trades', 'Trades'], ['open', 'Open']];
+  const SECTIONS = [['overview', 'Overview', 'Over'], ['performance', 'Performance', 'Perf'], ['risk', 'Risk', 'Risk'], ['trends', 'Trends', 'Trends'], ['trades', 'Trades', 'Trades'], ['open', 'Open', 'Open']];
   const FONT = "Inter, 'Helvetica Neue', system-ui, -apple-system, sans-serif";
 
   // ---- storage ----
@@ -2217,6 +2245,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     cmp: { a: '30d', b: 'p30d', af: '', at: '', bf: '', bt: '' },
     pending: null, activity: null, activityJson: null, activityMeta: null,
     positions: null, posFetched: null, posError: null, posBusy: false,
+    orders: null, ordFetched: null, ordError: null, ordBusy: false, ordAt: 0,
   };
   let charts = [], D = {};
   const persist = () => store.save({ trades: S.trades, theme: S.theme, settings: S.settings, section: S.section, activity: S.activity, activityJson: S.activityJson });
@@ -2322,10 +2351,10 @@ if (typeof module !== 'undefined') module.exports = AN;
   // ---- nav / sections / filters ----
   function renderNav() {
     const s = S.trades.length ? C.computeStats(S.trades) : null; const code = currencyCode();
-    $('#brand-status').textContent = s ? `${plural(s.tradeCount, 'trade')} · ${fdate(s.first, false)} – ${fdate(s.last, false)}${code ? ` · ${code}` : ''}${accounts().length > 1 ? ` · ${accounts().length} accounts` : ''}` : '';
+    // brand status removed: the filter bar already shows the trade count and date range
     $('#btn-export').disabled = !S.trades.length;
     $('#btn-sync').classList.toggle('hidden', RO || !S.settings.syncUrl);
-    $('#subnav').innerHTML = SECTIONS.map(([k, l]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}">${l}</button>`).join('');
+    $('#subnav').innerHTML = SECTIONS.map(([k, l, short]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}"><span class="lbl-full">${l}</span><span class="lbl-short">${short || l}</span></button>`).join('');
     $$('#subnav [data-section]').forEach(b => b.addEventListener('click', () => setSection(b.dataset.section)));
   }
   function setSection(k) {
@@ -2443,6 +2472,27 @@ if (typeof module !== 'undefined') module.exports = AN;
                movePts: move, pnl, risk, r: pnl != null && risk > 0 ? pnl / risk : null,
                riskPts, targetPts, rr: riskPts && targetPts ? targetPts / riskPts : null,
                beyondStop: riskPts != null && move != null && move < -riskPts };
+    });
+  }
+
+
+  // Pending working orders: limit and stop entries that have not triggered. They carry no P&L
+  // because nothing is filled, but they do carry risk the moment they do fill — which is the
+  // part worth seeing next to your open positions.
+  function computeOrders(rows) {
+    return (rows || []).map(o => {
+      const long = String(o.direction).toUpperCase() === 'BUY';
+      const mid = o.bid != null && o.offer != null ? (o.bid + o.offer) / 2 : (o.bid ?? o.offer ?? null);
+      const size = Math.abs(o.size) || 0;
+      const derived = pointValueFor(o.market, o.epic);
+      const unit = derived != null ? derived : null;
+      // distance the market must travel to trigger this order
+      const away = mid != null && o.orderLevel != null ? Math.abs(o.orderLevel - mid) : null;
+      const risk = o.stopDistance != null && unit != null ? Math.abs(o.stopDistance) * unit * size : null;
+      const reward = o.limitDistance != null && unit != null ? Math.abs(o.limitDistance) * unit * size : null;
+      return { ...o, long, mid, size, unit, unitSource: derived != null ? 'history' : 'none',
+               away, risk, reward, rr: risk > 0 && reward > 0 ? reward / risk : null,
+               gtc: /CANCELLED/i.test(o.timeInForce || '') };
     });
   }
 
@@ -2874,8 +2924,48 @@ if (typeof module !== 'undefined') module.exports = AN;
     });
   }
 
+
+  function ordersCard() {
+    if (S.ordError) return `<div class="card"><div class="card-head"><div class="card-title">Pending orders</div><span class="live bad">Error</span></div><div class="card-body dim" style="font-size:12px">${esc(S.ordError)}</div></div>`;
+    const rows = S.orders;
+    if (!rows) return '';
+    const stamp = S.ordFetched ? new Date(S.ordFetched) : null;
+    const head = `<span class="live"><i></i>Every 20s${stamp ? ` · ${stamp.toLocaleTimeString()}` : ''}</span>`;
+    if (!rows.length) return `<div class="card"><div class="card-head"><div class="card-title">Pending orders<small>Limit and stop entries waiting to trigger</small></div>${head}</div>
+      <div class="card-body dim" style="font-size:12px">No working orders.</div></div>`;
+    const wouldRisk = rows.reduce((a, o) => a + (o.risk || 0), 0);
+    const openRisk = (S.positions || []).reduce((a, p) => a + (p.risk || 0), 0);
+    const sess = D.risk && D.risk.sessions ? D.risk.sessions[D.risk.sessions.length - 1] : null;
+    const cap = sess && sess.capital ? sess.capital : null;
+    return `<div class="card"><div class="card-head"><div class="card-title">Pending orders<small>Not filled, so they carry no P&L — but they carry risk the moment they do</small></div>${head}</div>
+      <div class="card-body">
+        <div class="stat-row" style="padding-bottom:12px">
+          <div><span class="k">Waiting</span><b>${plural(rows.length, 'order')}</b><span class="k">${rows.filter(o => o.gtc).length} good till cancelled</span></div>
+          <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open</span></div>
+          ${cap ? `<div><span class="k">Committed if all fill</span><b class="${(openRisk + wouldRisk) > cap ? 'loss' : ''}">${((openRisk + wouldRisk) / cap * 100).toFixed(0)}%</b><span class="k">of this session's ${money(cap, 0)}, open and pending together</span></div>` : ''}
+        </div>
+        <div class="tbl-wrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="r">Size</th><th class="r">Trigger</th><th class="r">Now</th><th class="r">Away</th><th class="r">Risk</th><th class="r">R:R</th></tr></thead><tbody>
+          ${rows.map(o => `<tr>
+            <td class="sym">${esc(o.market || o.epic)}${o.guaranteedStop ? '<span class="tag">G</span>' : ''}${!o.gtc ? '<span class="tag" title="Expires rather than resting indefinitely">GTD</span>' : ''}</td>
+            <td><span class="side ${o.long ? 'long' : 'short'}">${o.long ? 'Buy' : 'Sell'}</span></td>
+            <td class="muted">${esc((o.orderType || '').toLowerCase())}</td>
+            <td class="r num muted">${o.size ?? '—'}</td>
+            <td class="r num">${o.orderLevel ?? '—'}</td>
+            <td class="r num muted">${o.mid != null ? (Math.round(o.mid * 1000) / 1000) : '—'}</td>
+            <td class="r num muted">${o.away != null ? o.away.toFixed(o.away < 10 ? 3 : 1) : '—'}</td>
+            <td class="r num ${o.risk ? 'loss' : 'dim'}">${o.risk != null ? money(o.risk) : '—'}</td>
+            <td class="r num muted">${o.rr ? o.rr.toFixed(2) : '—'}</td></tr>`).join('')}
+        </tbody></table></div>
+        ${rows.some(o => o.unitSource !== 'history') ? `<div class="dim" style="font-size:11px;margin-top:10px">Risk is blank where you have no closed trades on that instrument yet, so the value per point is unknown.</div>` : ''}
+      </div></div>`;
+  }
+
   function renderOpen() {
     const el = $('#open'); if (!el) return;
+    // the table is rebuilt on every poll; without this it snaps back to the left mid-read
+    const prev = el.querySelector('.tbl-wrap');
+    const keepScroll = prev ? prev.scrollLeft : 0;
+    const restore = () => { const now = el.querySelector('.tbl-wrap'); if (now && keepScroll) now.scrollLeft = keepScroll; };
     const cfg = S.settings, base = syncBase();
     if (!base) { el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Needs the IG sync worker</small></div><button class="btn sm" data-act="settings">Set it up</button></div><div class="card-body dim" style="font-size:12px">Add your worker URL and token in Settings and live positions appear here, refreshed automatically.</div></div>`; return; }
     const rows = S.positions;
@@ -2885,12 +2975,12 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (S.posError) {
       el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div>
         <div class="card-body"><div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(S.posError)}</div></div>
-        <button class="btn sm" data-act="poll-now">Try again</button></div></div>`; return;
+        <button class="btn sm" data-act="poll-now">Try again</button></div></div>`; restore(); return;
     }
-    if (!rows) { el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div><div class="card-body dim" style="font-size:12px">Checking…</div></div>`; return; }
+    if (!rows) { el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div><div class="card-body dim" style="font-size:12px">Checking…</div></div>`; restore(); return; }
     if (!rows.length) {
       el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div>
-        <div class="card-body dim" style="font-size:12px">Nothing open. Polling drops to every 15 seconds until a position appears.${stamp ? ` Last checked ${age}s ago.` : ''}</div></div>`; return;
+        <div class="card-body dim" style="font-size:12px">Nothing open. Polling drops to every 15 seconds until a position appears.${stamp ? ` Last checked ${age}s ago.` : ''}</div></div>` + ordersCard(); restore(); return;
     }
     const known = rows.filter(p => p.pnl != null);
     const net = known.reduce((a, p) => a + p.pnl, 0);
@@ -2922,9 +3012,9 @@ if (typeof module !== 'undefined') module.exports = AN;
         </tbody></table></div>
         ${approx ? `<div class="dim" style="font-size:11px;margin-top:10px">Rows marked <b>approx</b> use IG's contract size because you have no closed trades on that instrument yet, so the currency conversion is unverified. Once one closes, the figure becomes exact.</div>` : ''}
         <div class="dim" style="font-size:11px;margin-top:8px">These are mark-to-market snapshots, not outcomes. They never touch your win rate, expectancy, R-multiples or equity curve.</div>
-      </div></div>`;
+      </div></div>` + ordersCard();
+      restore();
   }
-
   // ---- orchestration ----
   function compute() {
     const tr = ranged(); const s = tr.length ? C.computeStats(tr) : null;
@@ -3027,12 +3117,30 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (gone) runSync(true);
       }
       lastOpenIds = ids;
+      fetchOrders();          // rate-limited internally
     } catch (err) {
       S.posError = String(err.message || err); pollFails++;
     }
     S.posBusy = false;
     if (S.section === 'open') renderOpen();
     renderNav();
+  }
+
+  // Orders change only when you place, cancel or trigger one, so they are polled far less
+  // often than positions. At 2s positions already use 30 of IG's ~40 requests a minute.
+  const ORDERS_EVERY = 20000;   // 3/min, leaving positions the bulk of IG's ~40/min budget
+  async function fetchOrders(force) {
+    const base = syncBase(); if (!base) return;
+    if (S.ordBusy || (!force && Date.now() - S.ordAt < ORDERS_EVERY)) return;
+    S.ordBusy = true; S.ordAt = Date.now();
+    try {
+      const res = await fetch(`${base}/orders`, { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      S.orders = computeOrders(data.orders); S.ordFetched = data.fetched; S.ordError = null;
+    } catch (err) { S.ordError = String(err.message || err); }
+    S.ordBusy = false;
+    if (S.section === 'open') renderOpen();
   }
 
   function pollInterval() {
@@ -3048,8 +3156,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     pollTimer = setTimeout(async () => { await fetchPositions(); schedulePoll(); }, wait);
   }
   function startAuto() {
-    if (RO || !S.settings.autoSync || !S.settings.syncUrl) { clearTimeout(pollTimer); return; }
+    clearTimeout(pollTimer);                       // never leave a second timer running
+    if (RO || !S.settings.autoSync || !S.settings.syncUrl) return;
     fetchPositions().then(schedulePoll);
+    fetchOrders(true);
     if (Date.now() - lastFullSync > 5 * 60 * 1000) runSync(true);   // safety net for fees and cash rows
   }
   document.addEventListener('visibilitychange', () => {
@@ -3482,7 +3592,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const tag = (e.target.tagName || '').toLowerCase(); if (['input', 'textarea', 'select'].includes(tag)) { if (e.key === 'Enter' && e.target.closest('#m-add')) submitTrade(); return; }
     if (!S.trades.length) return;
     if (e.key === 'ArrowLeft') moveMonth(-1); else if (e.key === 'ArrowRight') moveMonth(1); else if (e.key === 't' || e.key === 'T') { S.cal = { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }; renderCal(); }
-    else if (/^[1-5]$/.test(e.key)) setSection(SECTIONS[+e.key - 1][0]);
+    else if (/^[1-6]$/.test(e.key)) setSection(SECTIONS[+e.key - 1][0]);
   });
   $('#cmd-q').addEventListener('input', e => renderCmd(e.target.value));
   $('#file').addEventListener('change', e => { const f = e.target.files[0]; if (f) importFile(f); e.target.value = ''; });
