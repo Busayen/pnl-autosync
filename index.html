@@ -959,7 +959,10 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 
 /* Between the phone layout and a wide desktop there is a band where the brand, six tabs and
    five labelled buttons do not fit on one line. Collapse the buttons to icons there. */
-@media (min-width: 761px) and (max-width: 1179px) {
+@media (max-width: 1179px) {
+  /* Below this the brand, tabs and five labelled buttons cannot share a line. The labels go;
+     the icons stay. Covers the 641-760 band too, where a fixed 30px button box was clipping
+     visible labels into each other. */
   .nav-actions .btn .t { display: none; }
   .nav-actions .btn { padding: 0 9px; gap: 0; }
 }
@@ -2488,10 +2491,22 @@ if (typeof module !== 'undefined') module.exports = AN;
       const unit = derived != null ? derived : null;
       // distance the market must travel to trigger this order
       const away = mid != null && o.orderLevel != null ? Math.abs(o.orderLevel - mid) : null;
-      const risk = o.stopDistance != null && unit != null ? Math.abs(o.stopDistance) * unit * size : null;
-      const reward = o.limitDistance != null && unit != null ? Math.abs(o.limitDistance) * unit * size : null;
+      // stopDistance and limitDistance come back in IG points, while `unit` is per whole price
+      // unit. For JPY pairs those differ by 100, so the scaling factor is not optional.
+      // Without the scaling factor the distance units are unknown, and guessing produced a
+      // 100x error on JPY pairs. No scaling, no risk figure.
+      const scale = Number(o.scalingFactor) > 0 ? Number(o.scalingFactor) : null;
+      const stopPts = scale && o.stopDistance != null ? Math.abs(o.stopDistance) / scale : null;
+      const limitPts = scale && o.limitDistance != null ? Math.abs(o.limitDistance) / scale : null;
+      let risk = stopPts != null && unit != null ? stopPts * unit * size : null;
+      let reward = limitPts != null && unit != null ? limitPts * unit * size : null;
+      // Second net: a stop worth a fifth of the price is a units bug, not a wide stop.
+      const implausible = (scale == null && o.stopDistance != null)
+        || (risk != null && o.orderLevel > 0 && stopPts > o.orderLevel * 0.2);
+      if (implausible) { risk = null; reward = null; }
       return { ...o, long, mid, size, unit, unitSource: derived != null ? 'history' : 'none',
-               away, risk, reward, rr: risk > 0 && reward > 0 ? reward / risk : null,
+               away, stopPts, limitPts, risk, reward, implausible,
+               rr: risk > 0 && reward > 0 ? reward / risk : null,
                gtc: /CANCELLED/i.test(o.timeInForce || '') };
     });
   }
@@ -2944,7 +2959,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open</span></div>
           ${cap ? `<div><span class="k">Committed if all fill</span><b class="${(openRisk + wouldRisk) > cap ? 'loss' : ''}">${((openRisk + wouldRisk) / cap * 100).toFixed(0)}%</b><span class="k">of this session's ${money(cap, 0)}, open and pending together</span></div>` : ''}
         </div>
-        <div class="tbl-wrap"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="r">Size</th><th class="r">Trigger</th><th class="r">Now</th><th class="r">Away</th><th class="r">Risk</th><th class="r">R:R</th></tr></thead><tbody>
+        <div class="tbl-wrap" data-sk="orders"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="r">Size</th><th class="r">Trigger</th><th class="r">Now</th><th class="r">Away</th><th class="r">Risk</th><th class="r">R:R</th></tr></thead><tbody>
           ${rows.map(o => `<tr>
             <td class="sym">${esc(o.market || o.epic)}${o.guaranteedStop ? '<span class="tag">G</span>' : ''}${!o.gtc ? '<span class="tag" title="Expires rather than resting indefinitely">GTD</span>' : ''}</td>
             <td><span class="side ${o.long ? 'long' : 'short'}">${o.long ? 'Buy' : 'Sell'}</span></td>
@@ -2957,15 +2972,19 @@ if (typeof module !== 'undefined') module.exports = AN;
             <td class="r num muted">${o.rr ? o.rr.toFixed(2) : '—'}</td></tr>`).join('')}
         </tbody></table></div>
         ${rows.some(o => o.unitSource !== 'history') ? `<div class="dim" style="font-size:11px;margin-top:10px">Risk is blank where you have no closed trades on that instrument yet, so the value per point is unknown.</div>` : ''}
+        ${rows.some(o => o.implausible) ? `<div class="dim" style="font-size:11px;margin-top:6px">Risk is blank on one or more rows because IG did not supply the scaling needed to convert the stop distance into your currency. Better to show nothing than a wrong number.</div>` : ''}
       </div></div>`;
   }
 
   function renderOpen() {
     const el = $('#open'); if (!el) return;
-    // the table is rebuilt on every poll; without this it snaps back to the left mid-read
-    const prev = el.querySelector('.tbl-wrap');
-    const keepScroll = prev ? prev.scrollLeft : 0;
-    const restore = () => { const now = el.querySelector('.tbl-wrap'); if (now && keepScroll) now.scrollLeft = keepScroll; };
+    // Both cards are rebuilt on every poll. Keyed rather than indexed, because the positions
+    // card disappears when nothing is open and an index would then restore the wrong table.
+    const keep = new Map();
+    el.querySelectorAll('.tbl-wrap[data-sk]').forEach(w => { if (w.scrollLeft) keep.set(w.dataset.sk, w.scrollLeft); });
+    const restore = () => el.querySelectorAll('.tbl-wrap[data-sk]').forEach(w => {
+      const v = keep.get(w.dataset.sk); if (v) w.scrollLeft = v;
+    });
     const cfg = S.settings, base = syncBase();
     if (!base) { el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Needs the IG sync worker</small></div><button class="btn sm" data-act="settings">Set it up</button></div><div class="card-body dim" style="font-size:12px">Add your worker URL and token in Settings and live positions appear here, refreshed automatically.</div></div>`; return; }
     const rows = S.positions;
@@ -2997,7 +3016,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div><span class="k">Exposure</span><b>${rows.reduce((a, p) => a + p.size, 0).toFixed(2)}</b><span class="k">total size across positions</span></div>
           ${stamp ? `<div><span class="k">Updated</span><b>${stamp.toLocaleTimeString()}</b><span class="k">${age}s ago</span></div>` : ''}
         </div>
-        <div class="tbl-wrap"><table><thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Now</th><th class="r">Stop</th><th class="r">Risk</th><th class="r">R</th><th class="r">P&L</th><th class="act"></th></tr></thead><tbody>
+        <div class="tbl-wrap" data-sk="positions"><table><thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Now</th><th class="r">Stop</th><th class="r">Risk</th><th class="r">R</th><th class="r">P&L</th><th class="act"></th></tr></thead><tbody>
           ${rows.map(p => `<tr>
             <td class="sym">${esc(p.market || p.epic || '—')}${p.guaranteedStop ? '<span class="tag">G</span>' : ''}${p.unitSource !== 'history' ? '<span class="tag" title="Value per point taken from IG&apos;s contract size, not from your own closed trades">approx</span>' : ''}</td>
             <td><span class="side ${p.long ? 'long' : 'short'}">${p.long ? 'Long' : 'Short'}</span></td>
