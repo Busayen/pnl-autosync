@@ -22,6 +22,7 @@
   --profit-rgb: 16 185 129; --profit-soft: rgb(var(--profit-rgb) / 0.14); --profit-glow: rgb(var(--profit-rgb) / 0.35);
   --loss: #e11d48;
   --loss-rgb: 225 29 72; --loss-soft: rgb(var(--loss-rgb) / 0.14); --loss-glow: rgb(var(--loss-rgb) / 0.35);
+  --compare: #8b5cf6; --compare-rgb: 139 92 246;
   --accent: #f5f5f5; --accent-text: #0a0a0a;
   --shadow: 0 1px 2px rgba(0,0,0,.6), 0 12px 40px rgba(0,0,0,.45);
   --ring: rgba(255,255,255,0.25);
@@ -449,7 +450,7 @@ table.cmp td:first-child { width: 40%; }
 table.mini th, table.mini td { padding: 6px 10px; font-size: 12px; }
 .cmp-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cmp-lbl { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; font-size: 11px; font-weight: 700; }
-.cmp-lbl.a { background: var(--profit-soft); color: var(--profit); } .cmp-lbl.b { background: rgba(139,92,246,.15); color: #8b5cf6; }
+.cmp-lbl.a { background: var(--profit-soft); color: var(--profit); } .cmp-lbl.b { background: rgb(var(--compare-rgb) / .15); color: var(--compare); }
 .flagx { display: inline-block; margin-left: 6px; vertical-align: -2px; color: #f59e0b; } .flagx svg.i { width: 13px; height: 13px; }
 .day.breach { border-style: dashed; border-color: var(--loss); }
 .day .bflag { display: inline-block; margin-left: 4px; color: var(--loss); vertical-align: -2px; } .day .bflag svg.i { width: 10px; height: 10px; }
@@ -757,7 +758,7 @@ th { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform:
 tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 [data-theme="light"] tbody tr:nth-child(even) { background: rgba(0,0,0,.012); }
 .cons-row .cbar { box-shadow: inset 0 1px 1px rgba(0,0,0,.4); } .cons-row .cbar i { min-width: 6px; box-shadow: 0 0 8px rgb(var(--profit-text-rgb) / .6); }
-.cmp-lbl { border-radius: 6px; } .cmp-lbl.a { box-shadow: inset 0 0 0 1px rgb(var(--profit-text-rgb) / .3); } .cmp-lbl.b { box-shadow: inset 0 0 0 1px rgba(167,139,250,.3); }
+.cmp-lbl { border-radius: 6px; } .cmp-lbl.a { box-shadow: inset 0 0 0 1px rgb(var(--profit-text-rgb) / .3); } .cmp-lbl.b { box-shadow: inset 0 0 0 1px rgb(var(--compare-rgb) / .3); }
 .tbl-tools input[type=search] { border-radius: 7px; box-shadow: inset 0 1px 2px rgba(0,0,0,.4); }
 [data-theme="light"] .tbl-tools input[type=search] { box-shadow: none; }
 /* v5: section details */
@@ -966,6 +967,11 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .nav-actions .btn .t { display: none; }
   .nav-actions .btn { padding: 0 9px; gap: 0; }
 }
+
+.fx-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12.5px; color: var(--text-2); }
+.fx-row label { min-width: 62px; }
+.fx-row input { width: 120px; }
+.fx-row span { color: var(--text-3); }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -1052,7 +1058,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
             <div class="cal-tools"><div class="cal-month-sum" id="cal-sum"></div><button class="btn icon sm no-export" id="btn-image" data-act="image" title="Export as image" aria-label="Export calendar as image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button></div>
           </div>
           <div class="card-body"><div class="cal" id="cal"></div><div id="cal-note"></div></div>
-          <div class="legend"><span><i style="background:var(--profit-soft);border:1px solid rgba(16,185,129,.4)"></i>Profit</span><span><i style="background:var(--loss-soft);border:1px solid rgba(225,29,72,.4)"></i>Loss</span><span><i style="border:1px solid var(--border)"></i>No trades</span><span><i style="border:1px dashed var(--loss)"></i>Session low point</span><span style="margin-left:auto" class="no-export">Click a day for its trades · <span class="kbd">←</span> <span class="kbd">→</span> month · <span class="kbd">1</span>–<span class="kbd">6</span> sections · <span class="kbd">⌘K</span></span></div>
+          <div class="legend"><span><i style="background:var(--profit-soft);border:1px solid rgb(var(--profit-rgb) / .4)"></i>Profit</span><span><i style="background:var(--loss-soft);border:1px solid rgb(var(--loss-rgb) / .4)"></i>Loss</span><span><i style="border:1px solid var(--border)"></i>No trades</span><span><i style="border:1px dashed var(--loss)"></i>Session low point</span><span style="margin-left:auto" class="no-export">Click a day for its trades · <span class="kbd">←</span> <span class="kbd">→</span> month · <span class="kbd">1</span>–<span class="kbd">6</span> sections · <span class="kbd">⌘K</span></span></div>
         </section>
       </div>
 
@@ -1079,7 +1085,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
       <div class="section hidden" data-sec="trades">
         <section class="card" id="table-card">
           <div class="card-head"><div class="card-title">Trade history<small>Every row in the selected range</small></div>
-            <div class="tbl-tools"><span id="day-chip"></span><span class="select"><select id="tbl-kind"><option value="all">All rows</option><option value="trade">Trades only</option><option value="cost">Fees &amp; funding</option><option value="cash">Deposits &amp; withdrawals</option></select></span><input type="search" id="search" placeholder="Search symbol, setup, side"></div></div>
+            <div class="tbl-tools"><span id="day-chip"></span><span class="select"><select id="tbl-kind" aria-label="Row type"><option value="all">All rows</option><option value="trade">Trades only</option><option value="cost">Fees &amp; funding</option><option value="cash">Deposits &amp; withdrawals</option></select></span><input type="search" id="search" placeholder="Search symbol, setup, side"></div></div>
           <div id="table"></div>
         </section>
       </div>
@@ -1149,6 +1155,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
         <div class="field"><label for="s-synctoken">Sync token</label><input type="password" id="s-synctoken" placeholder="the SYNC_TOKEN you set on the worker"><div class="help">Reads history only. Not your IG password, which stays at Cloudflare.</div></div>
         <div class="field"><label for="s-syncdays">Sync range (days back)</label><input type="number" id="s-syncdays" placeholder="180" min="1" max="1095" step="1"></div>
         <div class="full switch"><div class="txt">Auto-refresh open positions<small>Polls only the positions endpoint. A full history sync runs when a position closes, when you return to the tab, and every five minutes.</small></div><button class="sw" id="s-autosync" data-act="toggle-costs" role="switch" aria-label="Auto-refresh"></button></div>
+        <div class="field full"><label>Exchange rates</label><div id="s-fx"></div><div class="help">Used only for positions priced in another currency. Nothing is converted unless you supply the rate, so the total is never based on a number this app guessed.</div></div>
         <div class="field"><label for="s-closetoken">Close token (optional)</label><input type="password" id="s-closetoken" placeholder="leave blank to be asked each time" autocomplete="off"><div class="help">Enables the Close button on open positions. Must match CLOSE_TOKEN on your worker, and must differ from the sync token. Leave blank and you will be prompted per close instead of storing it.</div></div>
         <div class="field"><label for="s-pollsecs">Refresh every (seconds)</label><input type="number" id="s-pollsecs" min="2" max="60" step="0.5" placeholder="2"><div class="help">Minimum 2s. IG allows roughly 40 requests a minute; 2s uses 30 and leaves headroom.</div></div>
         <div class="field full"><label>Activity history files</label><div id="s-actfiles"></div><div class="help">Files accumulate rather than replace, so several exports can be layered to cover a longer history.</div></div>
@@ -1221,6 +1228,7 @@ const CORE = (() => {
     openLevel: ['openlevel', 'openprice', 'entry', 'entrylevel', 'entryprice'],
     closeLevel: ['closelevel', 'closeprice', 'exit', 'exitlevel', 'exitprice'],
     risk: ['risk', 'riskamount', 'amountrisked', 'r', 'rvalue'],
+    tag: ['setup', 'tag', 'strategy', 'playbook'],
   };
   function pick(headerNorm, keys) {
     for (const k of keys) { const i = headerNorm.indexOf(k); if (i !== -1) return i; }
@@ -1291,6 +1299,10 @@ const CORE = (() => {
     if (!s || s === '-' || s === '—') return NaN;
     const neg = /^\(.*\)$/.test(s) || /[-−–]/.test(s) || /\bDR\b/i.test(s);
     s = s.replace(/[()]/g, '');
+    // 1e3 is a thousand, not thirteen. Strip the exponent out and the digits either side silently
+    // fuse, so exponent notation is parsed here before the currency clean-up removes the "e".
+    const sci = s.replace(/[\s,−–]/g, '').match(/^[-+]?\d*\.?\d+[eE][-+]?\d+$/);
+    if (sci) { const e = parseFloat(sci[0]); return isFinite(e) ? (neg ? -Math.abs(e) : e) : NaN; }
     let t = s.replace(/[^0-9.,]/g, '');
     if (!t) return NaN;
     const lc = t.lastIndexOf(','), ld = t.lastIndexOf('.');
@@ -1300,7 +1312,7 @@ const CORE = (() => {
       t = (n === 1 && after > 0 && after <= 2) ? t.replace(',', '.') : t.replace(/,/g, '');
     }
     const n = parseFloat(t);
-    if (isNaN(n)) return NaN;
+    if (!isFinite(n)) return NaN;
     return neg ? -Math.abs(n) : n;
   }
   function parseSize(v) {
@@ -1416,6 +1428,8 @@ const CORE = (() => {
         risk: (() => { const v = parseMoney(get(r, 'risk')); return isNaN(v) ? null : Math.abs(v); })(),
         kind,
       };
+      const tag = String(get(r, 'tag') || '').trim().slice(0, 32);
+      if (tag) t.tag = tag;
       t.id = tradeKey(t);
       out.trades.push(t);
       if (kind === 'cost') out.stats.costs++; else out.stats.trades++;
@@ -2241,7 +2255,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '' },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -2251,11 +2265,29 @@ if (typeof module !== 'undefined') module.exports = AN;
     orders: null, ordFetched: null, ordError: null, ordBusy: false, ordAt: 0,
   };
   let charts = [], D = {};
-  const persist = () => store.save({ trades: S.trades, theme: S.theme, settings: S.settings, section: S.section, activity: S.activity, activityJson: S.activityJson });
+  // localStorage refuses the write once the data outgrows the browser's quota. Nothing on screen
+  // changes when that happens, so without this the first the user hears of it is an empty page
+  // after a reload.
+  let warnedFull = false;
+  const persist = () => {
+    const ok = store.save({ trades: S.trades, theme: S.theme, settings: S.settings, section: S.section, activity: S.activity, activityJson: S.activityJson });
+    if (!ok && store.ok && !RO && !warnedFull) {
+      warnedFull = true;
+      // Callers toast their own success right after persisting, so the warning has to land after
+      // theirs rather than be overwritten by it.
+      setTimeout(() => toast('This browser is out of storage, so nothing new is being saved. Download a backup — what you see is still here, but it will not survive a reload.', 14000), 0);
+    }
+    if (ok) warnedFull = false;
+    return ok;
+  };
 
   // ---- formatting ----
   function currencyCode() { const c = {}; for (const t of S.trades) if (t.currency && (!S.f.account || (t.account || 'Main') === S.f.account)) c[t.currency] = (c[t.currency] || 0) + 1; const top = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; return top ? top[0] : ''; }
-  function sym() { if (S.settings.currency) return S.settings.currency; const code = currencyCode(); if (!code) return '$'; return CUR[code] ?? (/^[A-Z]{3}$/.test(code) ? code + ' ' : code); }
+  // The symbol is concatenated into money() and lands inside innerHTML in dozens of places, and
+  // it comes straight from an imported file or a restored backup — so keep it to the characters a
+  // currency symbol can actually be made of rather than trusting the source.
+  const cleanSym = v => String(v == null ? '' : v).replace(/[^\p{L}\p{Sc}.\s]/gu, '').trim().slice(0, 8);
+  function sym() { if (S.settings.currency) return cleanSym(S.settings.currency) || '$'; const code = cleanSym(currencyCode()); if (!code) return '$'; return CUR[code] ?? (/^[A-Z]{3}$/.test(code) ? code + ' ' : code); }
   const money = (n, d = 2) => (n < 0 ? '−' : '') + sym() + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   const signed = (n, d = 2) => (n > 0 ? '+' : '') + money(n, d);
   const compact = n => { if (n === 0) return sym() + '0'; const a = Math.abs(n); const s = (n < 0 ? '−' : n > 0 ? '+' : '') + sym(); return a >= 1e6 ? s + (a / 1e6).toFixed(1) + 'M' : a >= 1e4 ? s + (a / 1e3).toFixed(1) + 'k' : a >= 1e3 ? s + (a / 1e3).toFixed(2) + 'k' : s + a.toFixed(a < 10 ? 2 : 0); };
@@ -2368,7 +2400,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   function renderFilters() {
     const f = S.f, tr = D.tr; const n = tr.filter(t => t.kind === 'trade').length;
     $('#tabs').innerHTML = TFS.map(([k, l]) => `<button class="tab ${f.tf === k ? 'active' : ''}" data-tf="${k}">${l}</button>`).join('');
-    $('#custom-range').innerHTML = f.tf === 'custom' ? `<span class="range-inputs"><input type="date" id="f-from" value="${esc(f.from)}"> to <input type="date" id="f-to" value="${esc(f.to)}"></span>` : '';
+    $('#custom-range').innerHTML = f.tf === 'custom' ? `<span class="range-inputs"><input type="date" id="f-from" aria-label="Range start" value="${esc(f.from)}"> to <input type="date" id="f-to" aria-label="Range end" value="${esc(f.to)}"></span>` : '';
     $('#f-inst').innerHTML = `<option value="">All symbols</option>` + instruments().map(i => `<option value="${esc(i)}" ${f.instrument === i ? 'selected' : ''}>${esc(i)}</option>`).join('');
     $('#f-side').value = f.side;
     const accs = accounts(); $('#f-acc-wrap').classList.toggle('hidden', accs.length < 2);
@@ -2376,6 +2408,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     const tags = S.settings.tags || []; $('#f-tag-wrap').classList.toggle('hidden', !tags.length);
     $('#f-tag').innerHTML = `<option value="">All setups</option>` + tags.map(t => `<option value="${esc(t)}" ${f.tag === t ? 'selected' : ''}>${esc(t)}</option>`).join('');
     $('#f-summary').innerHTML = tr.length ? `<b>${plural(n, 'trade')}</b> · ${rangeLabel(tr)}` : 'No trades match';
+    // The row scrolls horizontally on a phone, and "All" — the default — sits off the right edge,
+    // so without this the user cannot see which timeframe is selected.
+    const tabsEl = $('#tabs'), activeTab = tabsEl.querySelector('.tab.active');
+    if (activeTab && tabsEl.scrollWidth > tabsEl.clientWidth) tabsEl.scrollLeft = Math.max(0, activeTab.offsetLeft - (tabsEl.clientWidth - activeTab.offsetWidth) / 2);
     $$('#tabs [data-tf]').forEach(b => b.addEventListener('click', () => { f.tf = b.dataset.tf; if (f.tf === 'custom' && !f.from) { const k = dayKeys(); f.from = k[0]; f.to = k[k.length - 1]; } S.selectedDay = null; renderData(); }));
     const ff = $('#f-from'), ft = $('#f-to');
     if (ff) ff.addEventListener('change', () => { f.from = ff.value; renderData(); });
@@ -2398,6 +2434,17 @@ if (typeof module !== 'undefined') module.exports = AN;
     return `<span class="delta ${good ? 'up' : 'down'}" title="vs previous period">${d > 0 ? '▲' : '▼'} ${fmt(Math.abs(d))}</span>`;
   }
   const ciTxt = (ci, fmt) => ci ? `<span class="ci" title="95% confidence interval from your ${ci.n || D.s.tradeCount} trades">${fmt(ci.lo)} – ${fmt(ci.hi)}</span>` : '';
+  // .kpi .value is nowrap inside an overflow:hidden card, so a six-figure P&L used to lose its
+  // last digits: "+$142,222.74" read as "+$142,222.7". Step the type down instead; short
+  // values keep the full size.
+  const FIT_MIN = 11;
+  function fitKpis() {
+    $$('#kpis .value').forEach(el => {
+      el.style.fontSize = '';
+      let size = parseFloat(getComputedStyle(el).fontSize);
+      while (el.scrollWidth > el.clientWidth + 0.5 && size > FIT_MIN) { size -= 1; el.style.fontSize = size + 'px'; }
+    });
+  }
   function renderKpis() {
     const el = $('#kpis'); const { tr, s, prev } = D;
     if (!s) { el.innerHTML = `<div class="card empty" style="grid-column:1/-1">No trades match these filters.</div>`; return; }
@@ -2422,6 +2469,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       <div class="card kpi"><div class="label">Total trades ${prev ? delta(s.tradeCount, prev.tradeCount, v => String(v)) : ''}</div>
         <div class="value num">${s.tradeCount}</div>
         <div class="sub"><b>${s.avgTradesPerDay.toFixed(1)}</b> per day · <b>${s.tradingDays}</b> ${s.tradingDays === 1 ? 'day' : 'days'}</div></div>`;
+    fitKpis();
     $('#kpi-note').textContent = prev ? `Deltas compare with the previous ${S.f.tf === 'intraday' ? 'trading day' : 'period of the same length'}${D.prevBounds ? ` (${fdate(D.prevBounds[0], false)} – ${fdate(D.prevBounds[1], false)})` : ''}.` : '';
   }
   function drawEquity() {
@@ -2478,11 +2526,40 @@ if (typeof module !== 'undefined') module.exports = AN;
     const n = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
     return (v < 0 ? '−' : '') + sym + n;
   }
-  const isForeign = row => row.unitSource !== 'history' && row.currency
-    && String(row.currency).toUpperCase() !== accountCcy();
+  // `ccy` is the row's working currency: null once the value came from your own history, or
+  // once a supplied rate has converted it. `currency` is IG's raw field and stays put, so it
+  // must not be the thing that decides whether a row counts toward the totals.
+  const isForeign = row => !!row.ccy && String(row.ccy).toUpperCase() !== accountCcy();
+
+  // A price that is not a number must not reach the table: it used to print straight through,
+  // so a bad field from the worker showed up as "[object Object]" in the Entry column.
+  const numOrNull = v => { const n = typeof v === 'number' ? v : (typeof v === 'string' ? parseFloat(v) : NaN); return isFinite(n) ? n : null; };
+
+  // A rate you supply, never one this app invents. Applied only where the value per point came
+  // from IG's contract size and is therefore in the instrument's own currency.
+  const fxRate = ccy => { const v = parseFloat((S.settings.fx || {})[String(ccy || '').toUpperCase()]); return v > 0 ? v : null; };
+  const fxCurrencies = () => {
+    const acct = accountCcy();
+    const set = new Set();
+    for (const r of [...(S.positions || []), ...(S.orders || [])]) {
+      if (r.unitSource !== 'history' && r.currency && String(r.currency).toUpperCase() !== acct) set.add(String(r.currency).toUpperCase());
+    }
+    return Array.from(set).sort();
+  };
+  // Rates IG itself used on your closed trades, shown as a reference when setting one by hand.
+  function igRatesSeen() {
+    const out = new Map();
+    for (const t of S.trades) {
+      const m = String(t.rawInstrument || t.instrument || '').match(/converted at ([\d.]+)/i);
+      if (m) out.set(t.instrument, parseFloat(m[1]));
+    }
+    return out;
+  }
 
   function computePositions(rows) {
-    return (rows || []).map(p => {
+    return (rows || []).map(raw => {
+      const p = { ...raw, level: numOrNull(raw.level), bid: numOrNull(raw.bid), offer: numOrNull(raw.offer),
+                  stopLevel: numOrNull(raw.stopLevel), limitLevel: numOrNull(raw.limitLevel) };
       const long = String(p.direction).toUpperCase() === 'BUY';
       const cur = long ? p.bid : p.offer;              // exit a long at the bid, a short at the offer
       const size = Math.abs(p.size) || 0;
@@ -2490,11 +2567,17 @@ if (typeof module !== 'undefined') module.exports = AN;
       const unit = derived != null ? derived : (p.contractSize || null);
       const move = cur != null && p.level != null ? (long ? cur - p.level : p.level - cur) : null;
       const pnl = move != null && unit != null ? move * unit * size : null;
-      const riskPts = p.stopLevel != null && p.level != null ? Math.abs(p.level - p.stopLevel) : null;
+      // Distance to the stop, signed by which side of entry it sits on. A long whose stop has
+      // been trailed above entry cannot lose — that stop pays out. Taking the absolute value
+      // booked those as risk, so "risk if all stops hit" counted locked-in gains as losses.
+      const stopPts = p.stopLevel != null && p.level != null ? (long ? p.level - p.stopLevel : p.stopLevel - p.level) : null;
+      const riskPts = stopPts != null && stopPts > 0 ? stopPts : null;         // null once it is beyond entry
+      const lockedPts = stopPts != null && stopPts < 0 ? -stopPts : null;      // guaranteed if the stop hits
       const risk = riskPts != null && unit != null ? riskPts * unit * size : null;
+      const locked = lockedPts != null && unit != null ? lockedPts * unit * size : null;
       const targetPts = p.limitLevel != null && p.level != null ? Math.abs(p.limitLevel - p.level) : null;
       return { ...p, long, cur, size, unit, unitSource: derived != null ? 'history' : (p.contractSize ? 'contract' : 'none'),
-               movePts: move, pnl, risk, r: pnl != null && risk > 0 ? pnl / risk : null,
+               movePts: move, pnl, risk, locked, r: pnl != null && risk > 0 ? pnl / risk : null,
                ccy: derived != null ? null : (p.currency || null),
                riskPts, targetPts, rr: riskPts && targetPts ? targetPts / riskPts : null,
                beyondStop: riskPts != null && move != null && move < -riskPts };
@@ -2505,6 +2588,20 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Pending working orders: limit and stop entries that have not triggered. They carry no P&L
   // because nothing is filled, but they do carry risk the moment they do fill — which is the
   // part worth seeing next to your open positions.
+
+  // Convert any row still carrying a foreign currency, if a rate has been supplied for it.
+  function applyFx(rows) {
+    const acct = accountCcy();
+    return (rows || []).map(r => {
+      if (!r.ccy || String(r.ccy).toUpperCase() === acct) return r;
+      const rate = fxRate(r.ccy);
+      if (!rate) return r;
+      const mul = v => (v == null ? v : v * rate);
+      return { ...r, pnl: mul(r.pnl), risk: mul(r.risk), locked: mul(r.locked), reward: mul(r.reward),
+               ccy: null, converted: { from: String(r.ccy).toUpperCase(), rate } };
+    });
+  }
+
   function computeOrders(rows) {
     return (rows || []).map(o => {
       const long = String(o.direction).toUpperCase() === 'BUY';
@@ -2709,7 +2806,11 @@ if (typeof module !== 'undefined') module.exports = AN;
               ${cs.stoppedAtCap ? `<div><span class="k">Stopped at the cap</span><b>${plural(cs.stoppedAtCap, 'session')}</b><span class="k">the stake did its job</span></div>` : ''}
             </div>
             <div class="cons">${csx.map(x => `<div class="cons-row"><span class="cl">${fdate(x.date, false)}</span><span class="cbar"><i style="width:${Math.min(100, x.consumed * 100).toFixed(1)}%" class="${x.consumed >= 0.85 ? 'hi' : x.consumed >= 0.5 ? 'mid' : ''}"></i></span><span class="cv num ${x.consumed >= 0.85 ? 'loss' : ''}">${(x.consumed * 100).toFixed(0)}%</span><span class="cd dim">${money(x.capital, 2)} → ${money(x.worstBalance, 2)}</span></div>`).join('')}</div>
-            <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.55">A fixed daily loss limit is not meaningful here: guaranteed stops plus margin mean you cannot lose more than the deposit, and your sessions cross day boundaries. Every calendar day in this range closed positive, including the one holding your 96% session.</div>
+            <div class="dim" style="font-size:11px;margin-top:12px;line-height:1.55">${(() => {
+              const w = cs.worstConsumed, red = Array.from(C.byDay(D.tr).values()).filter(d => d.pnl < 0).length;
+              return `A fixed daily loss limit does not map onto this: a session runs from a deposit to a withdrawal, so one drawdown can straddle two calendar days. The deepest gave up <b>${(w.consumed * 100).toFixed(0)}%</b> of the capital it started with, on ${fdate(w.date)}` +
+                (red ? `, and ${plural(red, 'calendar day')} in this range closed red.` : `, and every calendar day in this range closed positive.`);
+            })()}</div>
           </div></div>`
       : '';
     // exposure
@@ -2830,8 +2931,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     const { s, tr } = D; const el = $('#trends');
     if (!s) { el.innerHTML = '<div class="card empty">No trades match these filters.</div>'; return; }
     const T = D.trends; const roll = T.roll; const c = S.cmp;
-    const sel = (id, v) => `<span class="select"><select id="${id}">${PRESETS.map(([k, l]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>`;
-    const dates = (p, f, t) => S.cmp[p] === 'custom' ? `<span class="range-inputs"><input type="date" id="${f}" value="${esc(S.cmp[f])}"> to <input type="date" id="${t}" value="${esc(S.cmp[t])}"></span>` : '';
+    const sel = (id, v) => `<span class="select"><select id="${id}" aria-label="Range ${id.slice(-1).toUpperCase()}">${PRESETS.map(([k, l]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>`;
+    const dates = (p, f, t) => S.cmp[p] === 'custom' ? `<span class="range-inputs"><input type="date" id="${f}" aria-label="Range ${p.toUpperCase()} start" value="${esc(S.cmp[f])}"> to <input type="date" id="${t}" aria-label="Range ${p.toUpperCase()} end" value="${esc(S.cmp[t])}"></span>` : '';
     const A = T.cmpA, B = T.cmpB;
     const row = (label, fa, fb, klassFn) => `<tr><td class="muted">${label}</td><td class="r num ${klassFn ? klassFn(A.s) : ''}">${A.s ? fa(A.s) : '—'}</td><td class="r num ${klassFn ? klassFn(B.s) : ''}">${B.s ? fb(B.s) : '—'}</td></tr>`;
     const pfTxt = x => x.profitFactor === Infinity ? '∞' : x.profitFactor.toFixed(2);
@@ -2864,7 +2965,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         charts.push(new Chart(cv.getContext('2d'), { type: 'line', data: { labels: pts.map(x => `#${x.i} · ${fdate(x.date, false)}`), datasets: [{ label: 'Win rate', data: pts.map(x => x.winRate), borderColor: p, borderWidth: 2, tension: 0.3, pointRadius: 0, yAxisID: 'y' }, { label: 'Profit factor', data: pts.map(x => Math.min(x.pf, 8)), borderColor: acc, borderWidth: 1.5, borderDash: [4, 3], tension: 0.3, pointRadius: 0, yAxisID: 'y2' }] }, options: opts })); } }
     const A = T.cmpA, B = T.cmpB; const cv = $('#c-cmp');
     if (cv && (A.pts.length || B.pts.length)) { const n = Math.max(A.pts.length, B.pts.length); const labels = Array.from({ length: n + 1 }, (_, i) => i === 0 ? 'Start' : `#${i}`);
-      lineChart(cv, labels, [{ label: `A · ${A.label}`, data: [0].concat(A.pts.map(p => p.cum)), borderColor: cssVar('--profit') }, { label: `B · ${B.label}`, data: [0].concat(B.pts.map(p => p.cum)), borderColor: '#8b5cf6' }], { legend: true, xTicks: 10, labelFn: c => `${c.dataset.label.slice(0, 1)}: ${signed(c.parsed.y)}` }); }
+      lineChart(cv, labels, [{ label: `A · ${A.label}`, data: [0].concat(A.pts.map(p => p.cum)), borderColor: cssVar('--profit') }, { label: `B · ${B.label}`, data: [0].concat(B.pts.map(p => p.cum)), borderColor: cssVar('--compare') }], { legend: true, xTicks: 10, labelFn: c => `${c.dataset.label.slice(0, 1)}: ${signed(c.parsed.y)}` }); }
   }
 
   // ---- TRADES TABLE ----
@@ -2883,7 +2984,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const shown = S.showAll ? rows : rows.slice(0, 40);
     const th = (k, l, r = false) => `<th class="${r ? 'r' : ''} sortable ${S.sort.key === k ? 'sorted' : ''}" data-sort="${k}">${l}${S.sort.key === k ? `<span class="arrow">${S.sort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`;
     const total = rows.reduce((a, t) => a + t.pnl, 0); const multiAcc = accounts().length > 1;
-    const tagCell = t => t.kind !== 'trade' ? '<td></td>' : RO ? `<td class="muted">${esc(t.tag || '')}</td>` : `<td><select class="tagsel" data-tag="${esc(t.id)}"><option value="">—</option>${tags.map(x => `<option value="${esc(x)}" ${t.tag === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>`;
+    const tagCell = t => t.kind !== 'trade' ? '<td></td>' : RO ? `<td class="muted">${esc(t.tag || '')}</td>` : `<td><select class="tagsel" aria-label="Setup for ${esc(t.instrument || 'trade')} on ${t.date}" data-tag="${esc(t.id)}"><option value="">—</option>${tags.map(x => `<option value="${esc(x)}" ${t.tag === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>`;
     el.innerHTML = rows.length ? `<div class="tbl-wrap"><table><thead><tr>${th('date', 'Date')}<th>Time</th>${th('instrument', 'Symbol')}${multiAcc ? '<th>Account</th>' : ''}${th('side', 'Side')}${tags.length ? th('tag', 'Setup') : ''}${th('size', 'Size', true)}${th('hold', 'Hold', true)}${D.r && D.r.count ? th('r', 'R', true) : ''}${th('pnl', 'P&L', true)}<th class="act"></th></tr></thead><tbody>
       ${shown.map(t => `<tr><td class="muted">${fdate(t.date, false)}</td><td class="muted num">${esc(t.time || '—')}</td><td class="sym">${esc(t.instrument || '—')}${t.kind === 'cost' ? '<span class="tag">fee</span>' : t.kind === 'cash' ? '<span class="tag">cash</span>' : ''}${t.reference && t.reference.startsWith('MANUAL-') ? '<span class="tag">manual</span>' : ''}${flagged.has(t.id) ? `<span class="flagx" title="Outlier vs your usual size or result">${I.warn}</span>` : ''}${capOver.has(t.id) ? `<span class="flagx over" title="Risked more than your per-trade cap for that session">${I.warn}</span>` : ''}</td>${multiAcc ? `<td class="muted">${esc(t.account || 'Main')}</td>` : ''}<td>${t.direction ? `<span class="side ${t.direction === 'BUY' ? 'long' : 'short'}">${t.direction === 'BUY' ? 'Long' : 'Short'}</span>` : '<span class="dim">—</span>'}</td>${tags.length ? tagCell(t) : ''}<td class="r num muted">${esc(t.size || '—')}</td><td class="r num muted">${fhold(C.holdMinutes(t))}</td>${D.r && D.r.count ? `<td class="r num ${t.risk > 0 ? cls(t.pnl) : 'dim'}" ${t.risk > 0 ? `title="risked ${money(t.risk)} · stop ${t.stop}${t.riskSource === 'amended' ? ' (adjusted after entry)' : ''}${t.lockedIn ? ' · later trailed past entry' : ''}"` : ''}>${t.risk > 0 ? (t.pnl / t.risk >= 0 ? '+' : '−') + Math.abs(t.pnl / t.risk).toFixed(2) + 'R' : '—'}</td>` : ''}<td class="r num pnl-cell"><span class="pnl-pill ${cls(t.pnl)}">${signed(t.pnl)}</span></td><td class="act r">${RO ? '' : `<button class="del" data-del="${esc(t.id)}" aria-label="Delete">${I.trash}</button>`}</td></tr>`).join('')}
       </tbody></table></div>
@@ -2947,7 +3048,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (needToken) sessionCloseToken = tok;
         if (data.dealStatus === 'ACCEPTED') {
           done();
-          toast(`Closed ${esc(p.market)}${data.profit != null ? ` for ${signed(Number(data.profit))}` : ''}. IG confirmed.`, 6000);
+          toast(`Closed ${p.market || p.epic || 'the position'}${data.profit != null ? ` for ${signed(Number(data.profit))}` : ''}. IG confirmed.`, 6000);
           fetchPositions(); runSync(true);
         } else if (data.dealStatus === 'UNCONFIRMED') {
           status.textContent = ''; go.disabled = true;
@@ -2975,13 +3076,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     const wouldRisk = rows.filter(o => !isForeign(o)).reduce((a, o) => a + (o.risk || 0), 0);
     const openRisk = (S.positions || []).filter(p => !isForeign(p)).reduce((a, p) => a + (p.risk || 0), 0);
     const foreignOrders = rows.filter(o => isForeign(o)).length;
+    const convertedOrders = rows.filter(o => o.converted).length;
     const sess = D.risk && D.risk.sessions ? D.risk.sessions[D.risk.sessions.length - 1] : null;
     const cap = sess && sess.capital ? sess.capital : null;
     return `<div class="card"><div class="card-head"><div class="card-title">Pending orders<small>Not filled, so they carry no P&L — but they carry risk the moment they do</small></div>${head}</div>
       <div class="card-body">
         <div class="stat-row" style="padding-bottom:12px">
           <div><span class="k">Waiting</span><b>${plural(rows.length, 'order')}</b><span class="k">${rows.filter(o => o.gtc).length} good till cancelled</span></div>
-          <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open${foreignOrders ? ` · ${foreignOrders} in another currency, not totalled` : ''}</span></div>
+          <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open${foreignOrders ? ` · ${foreignOrders} not totalled, no rate set` : (convertedOrders ? ` · ${convertedOrders} converted` : '')}</span></div>
           ${cap ? `<div><span class="k">Committed if all fill</span><b class="${(openRisk + wouldRisk) > cap ? 'loss' : ''}">${((openRisk + wouldRisk) / cap * 100).toFixed(0)}%</b><span class="k">of this session's ${money(cap, 0)}, open and pending together</span></div>` : ''}
         </div>
         <div class="tbl-wrap" data-sk="orders"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="r">Size</th><th class="r">Trigger</th><th class="r">Now</th><th class="r">Away</th><th class="r">Risk</th><th class="r">R:R</th></tr></thead><tbody>
@@ -3027,10 +3129,12 @@ if (typeof module !== 'undefined') module.exports = AN;
         <div class="card-body dim" style="font-size:12px">Nothing open. Polling drops to every 15 seconds until a position appears.${stamp ? ` Last checked ${age}s ago.` : ''}</div></div>` + ordersCard(); restore(); return;
     }
     const acct = accountCcy();
-    const native = rows.filter(p => p.pnl != null && !isForeign(p));      // already in your currency
-    const foreign = rows.filter(p => isForeign(p));
+    const native = rows.filter(p => p.pnl != null && !isForeign(p));      // already in your currency, or converted into it
+    const foreign = rows.filter(p => isForeign(p));                        // still foreign: no rate supplied
+    const converted = rows.filter(p => p.converted);
     const net = native.reduce((a, p) => a + p.pnl, 0);
     const risk = rows.filter(p => !isForeign(p)).reduce((a, p) => a + (p.risk || 0), 0);
+    const lockedIn = rows.filter(p => !isForeign(p)).reduce((a, p) => a + (p.locked || 0), 0);
     const approx = rows.some(p => p.unitSource !== 'history');
     // live risk against the session cap, which is the part IG's own app will not tell you
     const cap = D.risk && D.risk.discipline ? D.risk.discipline : null;
@@ -3038,24 +3142,26 @@ if (typeof module !== 'undefined') module.exports = AN;
     el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Unrealised, and excluded from every statistic in this app</small></div>${head}</div>
       <div class="card-body">
         <div class="stat-row" style="padding-bottom:12px">
-          <div><span class="k">Unrealised P&L</span><b class="${cls(net)}">${native.length ? signed(net) : '—'}</b><span class="k">${plural(rows.length, 'position')}${foreign.length ? ` · ${foreign.length} in another currency, not totalled` : ''}</span></div>
-          <div><span class="k">Risk if all stops hit</span><b class="${risk ? 'loss' : ''}">${risk ? money(-risk) : '—'}</b><span class="k">${foreign.length ? `${acct} positions only` : (sess && sess.capital ? `${(risk / sess.capital * 100).toFixed(0)}% of this session's ${money(sess.capital, 0)}` : 'no session capital known')}</span></div>
+          <div><span class="k">Unrealised P&L</span><b class="${cls(net)}">${native.length ? signed(net) : '—'}</b><span class="k">${plural(rows.length, 'position')}${foreign.length ? ` · ${foreign.length} not totalled, no rate set` : (converted.length ? ` · ${converted.length} converted at your rate` : '')}</span></div>
+          <div><span class="k">Risk if all stops hit</span><b class="${risk ? 'loss' : ''}">${risk ? money(-risk) : '—'}</b><span class="k">${lockedIn ? `${money(lockedIn)} already locked in` : foreign.length ? `${acct} positions only` : (sess && sess.capital ? `${(risk / sess.capital * 100).toFixed(0)}% of this session's ${money(sess.capital, 0)}` : 'no session capital known')}</span></div>
           <div><span class="k">Exposure</span><b>${rows.reduce((a, p) => a + p.size, 0).toFixed(2)}</b><span class="k">total size across positions</span></div>
           ${stamp ? `<div><span class="k">Updated</span><b>${stamp.toLocaleTimeString()}</b><span class="k">${age}s ago</span></div>` : ''}
         </div>
         <div class="tbl-wrap" data-sk="positions"><table><thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Now</th><th class="r">Stop</th><th class="r">Risk</th><th class="r">R</th><th class="r">P&L</th><th class="act"></th></tr></thead><tbody>
           ${rows.map(p => `<tr>
-            <td class="sym">${esc(p.market || p.epic || '—')}${p.guaranteedStop ? '<span class="tag">G</span>' : ''}${p.unitSource !== 'history' ? '<span class="tag" title="Value per point taken from IG&apos;s contract size, not from your own closed trades">approx</span>' : ''}</td>
+            <td class="sym">${esc(p.market || p.epic || '—')}${p.guaranteedStop ? '<span class="tag">G</span>' : ''}${p.unitSource !== 'history' ? '<span class="tag" title="Value per point taken from IG&apos;s contract size, not from your own closed trades">approx</span>' : ''}${p.converted ? `<span class="tag" title="Converted from ${esc(p.converted.from)} at ${p.converted.rate}, the rate you set">fx</span>` : ''}</td>
             <td><span class="side ${p.long ? 'long' : 'short'}">${p.long ? 'Long' : 'Short'}</span></td>
             <td class="r num muted">${p.size}</td>
             <td class="r num muted">${p.level ?? '—'}</td>
             <td class="r num">${p.cur ?? '—'}</td>
             <td class="r num ${p.beyondStop ? 'loss' : 'muted'}">${p.stopLevel ?? '—'}</td>
-            <td class="r num muted">${p.risk != null ? moneyIn(p.risk, p.ccy) : '—'}</td>
+            <td class="r num ${p.locked != null ? 'profit' : 'muted'}"${p.locked != null ? ' title="The stop sits beyond entry, so this position cannot lose — that is locked in, not at risk."' : ''}>${p.risk != null ? moneyIn(p.risk, p.ccy) : p.locked != null ? '+' + moneyIn(p.locked, p.ccy) : '—'}</td>
             <td class="r num ${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</td>
             <td class="r num ${cls(p.pnl)}" style="font-weight:600">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</td>
             <td class="act r">${S.settings.syncUrl ? `<button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
+        ${converted.length ? `<div class="dim" style="font-size:11px;margin-top:10px">${plural(converted.length, 'row')} converted into ${acct} using the rate you set (${converted.map(c => `1 ${c.converted.from} = ${c.converted.rate}`).filter((v, i, a) => a.indexOf(v) === i).join(', ')}). Change it in Settings.</div>` : ''}
+        ${foreign.length ? `<div class="dim" style="font-size:11px;margin-top:10px">${plural(foreign.length, 'row')} left out of the totals because no exchange rate is set for ${Array.from(new Set(foreign.map(f => String(f.ccy).toUpperCase()))).join(', ')}. <button class="btn ghost sm" data-act="settings">Set a rate</button></div>` : ''}
         ${approx ? `<div class="dim" style="font-size:11px;margin-top:10px">Rows marked <b>approx</b> have no closed trades behind them yet, so the value per point comes from IG's contract size. Those figures are shown in the instrument's own currency${acct ? `, not ${acct}` : ''}, and are left out of the totals above. Once one closes, the figure becomes exact and converts automatically.</div>` : ''}
         <div class="dim" style="font-size:11px;margin-top:8px">These are mark-to-market snapshots, not outcomes. They never touch your win rate, expectancy, R-multiples or equity curve.</div>
       </div></div>` + ordersCard();
@@ -3153,7 +3259,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       const res = await fetch(`${base}/positions`, { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
-      S.positions = computePositions(data.positions);
+      S.positions = applyFx(computePositions(data.positions));
       S.posFetched = data.fetched || new Date().toISOString();
       S.posError = null; pollFails = 0;
       const ids = S.positions.map(p => p.dealId).sort().join('|');
@@ -3183,7 +3289,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       const res = await fetch(`${base}/orders`, { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
-      S.orders = computeOrders(data.orders); S.ordFetched = data.fetched; S.ordError = null;
+      S.orders = applyFx(computeOrders(data.orders)); S.ordFetched = data.fetched; S.ordError = null;
     } catch (err) { S.ordError = String(err.message || err); }
     S.ordBusy = false;
     if (S.section === 'open') renderOpen();
@@ -3256,6 +3362,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     S.selectedDay = null; S.f = { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' };
     const latest = S.trades.filter(t => t.kind !== 'cash').reduce((a, t) => t.date > a ? t.date : a, '') || today;
     S.cal = S.trades.some(t => t.date.startsWith(today.slice(0, 7))) ? { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 } : { y: +latest.slice(0, 4), m: +latest.slice(5, 7) - 1 };
+    // Setups that arrived with the file are only usable once they are in the tag list the
+    // Setup column and the filter are built from.
+    const found = Array.from(new Set(p.trades.map(t => t.tag).filter(Boolean)));
+    if (found.length) S.settings.tags = Array.from(new Set([...(S.settings.tags || []), ...found])).slice(0, 20);
     S.pending = null; applyActivity(); persist(); closeModals(); renderAll();
     toast(`${p.source === 'demo' ? 'Loaded' : 'Imported'} ${plural(p.stats.trades, 'trade')}${p.stats.costs ? ` and ${plural(p.stats.costs, 'fee row')}` : ''} into ${name}. ${mode === 'account' ? 'Other accounts kept.' : 'Previous data replaced.'}`);
   }
@@ -3296,7 +3406,9 @@ if (typeof module !== 'undefined') module.exports = AN;
   function importFile(f) { const r = new FileReader(); r.onload = e => importText(String(e.target.result), (f.name || '').replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, 24) || 'Main'); r.readAsText(f); }
   function download(name, text, type = 'text/csv') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400); }
   function csv(rows) { const q = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    return 'date,time,instrument,direction,size,currency,pnl,reference,open,close,kind,account,tag\n' + rows.slice().sort((a, b) => C.sortTs(a) - C.sortTs(b)).map(t => [t.date, t.time, t.instrument, t.direction, t.size, t.currency, t.pnl.toFixed(2), t.reference, t.openTs, t.closeTs, t.kind, t.account || 'Main', t.tag || ''].map(q).join(',')).join('\n') + '\n'; }
+    // Header names the importer's own vocabulary recognises, so an export re-imports without
+    // quietly dropping the open/close timestamps (hold time, exposure) or the setup tag.
+    return 'date,time,instrument,direction,size,currency,pnl,reference,open time,close time,kind,account,setup\n' + rows.slice().sort((a, b) => C.sortTs(a) - C.sortTs(b)).map(t => [t.date, t.time, t.instrument, t.direction, t.size, t.currency, t.pnl.toFixed(2), t.reference, t.openTs, t.closeTs, t.kind, t.account || 'Main', t.tag || ''].map(q).join(',')).join('\n') + '\n'; }
   function demoTrades() {
     const specs = [['US500', 'BUY', 1, 184.5, 34, 5], ['NAS100', 'SELL', 0.5, -96.2, 32, 6], ['XAUUSD', 'BUY', 0.2, 142.8, 31, 4], ['EURUSD', 'SELL', 1, -48.3, 31, 9], ['US500', 'BUY', 1, 61.4, 30, 3], ['GBPUSD', 'BUY', 0.5, 27.9, 28, 11], ['US500', 'SELL', 1.5, -132.7, 27, 5], ['USDJPY', 'SELL', 0.5, 73.1, 26, 7], ['NAS100', 'BUY', 0.5, 218.6, 24, 8], ['XAUUSD', 'BUY', 0.2, -58.4, 23, 6], ['US500', 'BUY', 1, 92.3, 21, 5], ['EURUSD', 'BUY', 1, 39.7, 20, 12], ['US500', 'SELL', 1, -74.9, 19, 4], ['NAS100', 'SELL', 0.5, 156.2, 17, 7], ['GBPUSD', 'SELL', 0.5, -31.6, 16, 9], ['XAUUSD', 'SELL', 0.2, 88.5, 14, 5], ['US500', 'BUY', 1.5, 247.9, 13, 3], ['USDJPY', 'BUY', 0.5, -44.2, 12, 10], ['US500', 'BUY', 1, 18.6, 10, 6], ['NAS100', 'BUY', 0.5, -168.3, 9, 8], ['EURUSD', 'SELL', 1, 52.4, 7, 11], ['US500', 'SELL', 1, 109.8, 6, 5], ['XAUUSD', 'BUY', 0.2, 67.3, 3, 4], ['GBPUSD', 'BUY', 0.5, -22.8, 2, 12], ['US500', 'BUY', 1, 131.5, 1, 4]];
     const out = []; const now = new Date(); const setups = ['Breakout', 'Pullback', 'Reversal'];
@@ -3343,6 +3455,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     $('#s-syncurl').value = s.syncUrl || ''; $('#s-synctoken').value = s.syncToken || ''; $('#s-syncdays').value = s.syncDays || 180;
     $('#s-autosync').classList.toggle('on', s.autoSync !== false);
     $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || '';
+    const ccys = fxCurrencies(), acctC = accountCcy() || 'your currency', seen = igRatesSeen();
+    $('#s-fx').innerHTML = ccys.length
+      ? ccys.map(c => `<div class="fx-row"><label for="fx-${c}">1 ${c} =</label><input type="number" id="fx-${c}" data-fx="${c}" step="0.0001" min="0" placeholder="rate" value="${esc(String((s.fx || {})[c] ?? ''))}"><span>${esc(acctC)}</span></div>`).join('')
+        + (seen.size ? `<div class="help">For reference, IG converted past trades at: ${Array.from(seen).slice(-3).map(([k, v]) => `${esc(k)} ${v}`).join(', ')}.</div>` : '')
+      : `<div class="help">Nothing to convert. Rates appear here only when an open position or order is priced in a currency other than ${esc(acctC)}.</div>`;
     $('#s-syncstatus').textContent = s.lastSync ? `Last synced ${new Date(s.lastSync).toLocaleString()}.` : 'Never synced.';
     const files = actList(); const m = S.activityMeta;
     $('#s-actfiles').innerHTML = files.length
@@ -3362,6 +3479,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     s.syncUrl = $('#s-syncurl').value.trim(); s.syncToken = $('#s-synctoken').value.trim(); s.syncDays = parseInt($('#s-syncdays').value) || 180;
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();
+    s.fx = {};
+    $$('#s-fx [data-fx]').forEach(i => { const v = parseFloat(i.value); if (v > 0) s.fx[i.dataset.fx] = v; });
+    s.fx = {};
+    $$('#s-fx [data-fx]').forEach(i => { const v = parseFloat(i.value); if (v > 0) s.fx[i.dataset.fx] = v; });
     s.riskKeep = $('#s-riskkeep').value.trim() || 25;
     s.tags = $('#s-tags').value.split(',').map(x => x.trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, 20);
     if (S.f.tag && !s.tags.includes(S.f.tag)) S.f.tag = '';
@@ -3567,6 +3688,31 @@ if (typeof module !== 'undefined') module.exports = AN;
     };
     S.settings.profitColor ? set('profit', S.settings.profitColor) : PROPS('profit').forEach(p => root.removeProperty(p));
     S.settings.lossColor ? set('loss', S.settings.lossColor) : PROPS('loss').forEach(p => root.removeProperty(p));
+    setCompare(S.settings.profitColor || PALETTES.default.profit, S.settings.lossColor || PALETTES.default.loss);
+  }
+  // Range B on the Trends comparison is a third colour. It was violet, which is exactly the
+  // Violet / Amber palette's profit colour — the two curves came out identical. Pick whichever
+  // candidate sits furthest round the wheel from both of the chosen colours instead.
+  const COMPARE_CANDIDATES = ['#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899', '#84cc16'];
+  function hueOf(rgb) {
+    const [r, g, b] = rgb.map(c => c / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    if (!d) return 0;
+    const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  }
+  const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+  function setCompare(profitHex, lossHex) {
+    const root = document.documentElement.style;
+    const pr = hexToRgb(profitHex), lr = hexToRgb(lossHex);
+    if (!pr || !lr) { root.removeProperty('--compare'); root.removeProperty('--compare-rgb'); return; }
+    const ph = hueOf(pr), lh = hueOf(lr);
+    let best = COMPARE_CANDIDATES[0], bestGap = -1;
+    for (const hex of COMPARE_CANDIDATES) {
+      const h = hueOf(hexToRgb(hex)), gap = Math.min(hueGap(h, ph), hueGap(h, lh));
+      if (gap > bestGap) { bestGap = gap; best = hex; }
+    }
+    root.setProperty('--compare', best);
+    root.setProperty('--compare-rgb', hexToRgb(best).join(' '));
   }
 
   function applyTheme() { document.documentElement.setAttribute('data-theme', S.theme); applyColors(); }
@@ -3670,7 +3816,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   })();
   // keep the active section tab in view when it changes
   const scrollNavIntoView = () => { const a = $('#subnav .snav.active'); if (a && a.scrollIntoView) a.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); };
-  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => charts.forEach(c => c.resize()), 120); });
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { charts.forEach(c => c.resize()); fitKpis(); }, 120); });
 
   // ---- boot ----
   if (RO) {
