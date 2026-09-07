@@ -878,6 +878,29 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .nav.nav-hidden { transform: translateY(-100%); }
 @media (prefers-reduced-motion: reduce) { .nav { transition: none; } }
 @media print { .nav.nav-hidden { transform: none; } }
+
+/* Trades header on narrow screens: the day chip, its summary, the row filter and the search
+   box were all competing for one flex row, so the chip collapsed to 89px and everything
+   wrapped a word at a time. Give each group its own row. */
+#day-chip:empty { display: none; }
+@media (max-width: 760px) {
+  #table-card .card-head { flex-direction: column; align-items: stretch; gap: 10px; padding: 13px 14px; }
+  #table-card .card-title { font-size: 13.5px; }
+  .tbl-tools { width: 100%; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #day-chip { order: -1; flex: 1 1 100%; display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }
+  .chip { white-space: nowrap; flex: none; height: 28px; }
+  .day-summary { gap: 6px 10px; font-size: 11.5px; row-gap: 2px; }
+  .day-summary > span, .day-summary > b { white-space: nowrap; }
+  .tbl-tools .select { flex: 0 1 128px; min-width: 0; }
+  .tbl-tools .select select { width: 100%; }
+  .tbl-tools input[type=search] { flex: 1 1 140px; min-width: 0; width: auto; }
+}
+@media (max-width: 400px) {
+  .day-summary { font-size: 11px; gap: 4px 8px; }
+}
+@media (max-width: 340px) {
+  .tbl-tools .select, .tbl-tools input[type=search] { flex: 1 1 100%; }
+}
 </style>
 <script>/*!
  * Chart.js v4.4.1
