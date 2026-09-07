@@ -2459,6 +2459,28 @@ if (typeof module !== 'undefined') module.exports = AN;
     vals.sort((a, b) => a - b);
     return vals[Math.floor(vals.length / 2)];          // median resists one odd fill
   }
+
+  // When the value per point comes from IG's contractSize rather than your own closed trades,
+  // the resulting figure is in the INSTRUMENT's currency, not your account currency. Labelling
+  // a USD number with S$ is worse than showing no number, so tag it with its real currency.
+  const CCY_SYM = { USD: 'US$', SGD: 'S$', EUR: '€', GBP: '£', JPY: '¥', AUD: 'A$', NZD: 'NZ$',
+                    CAD: 'C$', CHF: 'CHF ', HKD: 'HK$', ZAR: 'R', SEK: 'kr', NOK: 'kr' };
+  const accountCcy = () => {
+    const t = S.trades.find(x => x.currency);
+    return t ? String(t.currency).toUpperCase() : '';
+  };
+  // money in a currency that may not be the account's
+  function moneyIn(v, ccy, dp = 2) {
+    if (v == null || !isFinite(v)) return '—';
+    const acct = accountCcy();
+    if (!ccy || ccy.toUpperCase() === acct) return money(v, dp);
+    const sym = CCY_SYM[String(ccy).toUpperCase()] || (String(ccy).toUpperCase() + ' ');
+    const n = Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    return (v < 0 ? '−' : '') + sym + n;
+  }
+  const isForeign = row => row.unitSource !== 'history' && row.currency
+    && String(row.currency).toUpperCase() !== accountCcy();
+
   function computePositions(rows) {
     return (rows || []).map(p => {
       const long = String(p.direction).toUpperCase() === 'BUY';
@@ -2473,6 +2495,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       const targetPts = p.limitLevel != null && p.level != null ? Math.abs(p.limitLevel - p.level) : null;
       return { ...p, long, cur, size, unit, unitSource: derived != null ? 'history' : (p.contractSize ? 'contract' : 'none'),
                movePts: move, pnl, risk, r: pnl != null && risk > 0 ? pnl / risk : null,
+               ccy: derived != null ? null : (p.currency || null),
                riskPts, targetPts, rr: riskPts && targetPts ? targetPts / riskPts : null,
                beyondStop: riskPts != null && move != null && move < -riskPts };
     });
@@ -2505,6 +2528,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         || (risk != null && o.orderLevel > 0 && stopPts > o.orderLevel * 0.2);
       if (implausible) { risk = null; reward = null; }
       return { ...o, long, mid, size, unit, unitSource: derived != null ? 'history' : 'none',
+               ccy: derived != null ? null : (o.currency || null),
                away, stopPts, limitPts, risk, reward, implausible,
                rr: risk > 0 && reward > 0 ? reward / risk : null,
                gtc: /CANCELLED/i.test(o.timeInForce || '') };
@@ -2948,15 +2972,16 @@ if (typeof module !== 'undefined') module.exports = AN;
     const head = `<span class="live"><i></i>Every 20s${stamp ? ` · ${stamp.toLocaleTimeString()}` : ''}</span>`;
     if (!rows.length) return `<div class="card"><div class="card-head"><div class="card-title">Pending orders<small>Limit and stop entries waiting to trigger</small></div>${head}</div>
       <div class="card-body dim" style="font-size:12px">No working orders.</div></div>`;
-    const wouldRisk = rows.reduce((a, o) => a + (o.risk || 0), 0);
-    const openRisk = (S.positions || []).reduce((a, p) => a + (p.risk || 0), 0);
+    const wouldRisk = rows.filter(o => !isForeign(o)).reduce((a, o) => a + (o.risk || 0), 0);
+    const openRisk = (S.positions || []).filter(p => !isForeign(p)).reduce((a, p) => a + (p.risk || 0), 0);
+    const foreignOrders = rows.filter(o => isForeign(o)).length;
     const sess = D.risk && D.risk.sessions ? D.risk.sessions[D.risk.sessions.length - 1] : null;
     const cap = sess && sess.capital ? sess.capital : null;
     return `<div class="card"><div class="card-head"><div class="card-title">Pending orders<small>Not filled, so they carry no P&L — but they carry risk the moment they do</small></div>${head}</div>
       <div class="card-body">
         <div class="stat-row" style="padding-bottom:12px">
           <div><span class="k">Waiting</span><b>${plural(rows.length, 'order')}</b><span class="k">${rows.filter(o => o.gtc).length} good till cancelled</span></div>
-          <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open</span></div>
+          <div><span class="k">Risk if all fill</span><b class="${wouldRisk ? 'loss' : ''}">${wouldRisk ? money(-wouldRisk) : '—'}</b><span class="k">on top of what is already open${foreignOrders ? ` · ${foreignOrders} in another currency, not totalled` : ''}</span></div>
           ${cap ? `<div><span class="k">Committed if all fill</span><b class="${(openRisk + wouldRisk) > cap ? 'loss' : ''}">${((openRisk + wouldRisk) / cap * 100).toFixed(0)}%</b><span class="k">of this session's ${money(cap, 0)}, open and pending together</span></div>` : ''}
         </div>
         <div class="tbl-wrap" data-sk="orders"><table><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th class="r">Size</th><th class="r">Trigger</th><th class="r">Now</th><th class="r">Away</th><th class="r">Risk</th><th class="r">R:R</th></tr></thead><tbody>
@@ -2968,7 +2993,7 @@ if (typeof module !== 'undefined') module.exports = AN;
             <td class="r num">${o.orderLevel ?? '—'}</td>
             <td class="r num muted">${o.mid != null ? (Math.round(o.mid * 1000) / 1000) : '—'}</td>
             <td class="r num muted">${o.away != null ? o.away.toFixed(o.away < 10 ? 3 : 1) : '—'}</td>
-            <td class="r num ${o.risk ? 'loss' : 'dim'}">${o.risk != null ? money(o.risk) : '—'}</td>
+            <td class="r num ${o.risk ? 'loss' : 'dim'}">${o.risk != null ? moneyIn(o.risk, o.ccy) : '—'}</td>
             <td class="r num muted">${o.rr ? o.rr.toFixed(2) : '—'}</td></tr>`).join('')}
         </tbody></table></div>
         ${rows.some(o => o.unitSource !== 'history') ? `<div class="dim" style="font-size:11px;margin-top:10px">Risk is blank where you have no closed trades on that instrument yet, so the value per point is unknown.</div>` : ''}
@@ -3001,9 +3026,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div>
         <div class="card-body dim" style="font-size:12px">Nothing open. Polling drops to every 15 seconds until a position appears.${stamp ? ` Last checked ${age}s ago.` : ''}</div></div>` + ordersCard(); restore(); return;
     }
-    const known = rows.filter(p => p.pnl != null);
-    const net = known.reduce((a, p) => a + p.pnl, 0);
-    const risk = rows.reduce((a, p) => a + (p.risk || 0), 0);
+    const acct = accountCcy();
+    const native = rows.filter(p => p.pnl != null && !isForeign(p));      // already in your currency
+    const foreign = rows.filter(p => isForeign(p));
+    const net = native.reduce((a, p) => a + p.pnl, 0);
+    const risk = rows.filter(p => !isForeign(p)).reduce((a, p) => a + (p.risk || 0), 0);
     const approx = rows.some(p => p.unitSource !== 'history');
     // live risk against the session cap, which is the part IG's own app will not tell you
     const cap = D.risk && D.risk.discipline ? D.risk.discipline : null;
@@ -3011,8 +3038,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Unrealised, and excluded from every statistic in this app</small></div>${head}</div>
       <div class="card-body">
         <div class="stat-row" style="padding-bottom:12px">
-          <div><span class="k">Unrealised P&L</span><b class="${cls(net)}">${signed(net)}</b><span class="k">${plural(rows.length, 'position')}${approx ? ' · some approximate' : ''}</span></div>
-          <div><span class="k">Risk if all stops hit</span><b class="${risk ? 'loss' : ''}">${risk ? money(-risk) : '—'}</b><span class="k">${sess && sess.capital ? `${(risk / sess.capital * 100).toFixed(0)}% of this session's ${money(sess.capital, 0)}` : 'no session capital known'}</span></div>
+          <div><span class="k">Unrealised P&L</span><b class="${cls(net)}">${native.length ? signed(net) : '—'}</b><span class="k">${plural(rows.length, 'position')}${foreign.length ? ` · ${foreign.length} in another currency, not totalled` : ''}</span></div>
+          <div><span class="k">Risk if all stops hit</span><b class="${risk ? 'loss' : ''}">${risk ? money(-risk) : '—'}</b><span class="k">${foreign.length ? `${acct} positions only` : (sess && sess.capital ? `${(risk / sess.capital * 100).toFixed(0)}% of this session's ${money(sess.capital, 0)}` : 'no session capital known')}</span></div>
           <div><span class="k">Exposure</span><b>${rows.reduce((a, p) => a + p.size, 0).toFixed(2)}</b><span class="k">total size across positions</span></div>
           ${stamp ? `<div><span class="k">Updated</span><b>${stamp.toLocaleTimeString()}</b><span class="k">${age}s ago</span></div>` : ''}
         </div>
@@ -3024,12 +3051,12 @@ if (typeof module !== 'undefined') module.exports = AN;
             <td class="r num muted">${p.level ?? '—'}</td>
             <td class="r num">${p.cur ?? '—'}</td>
             <td class="r num ${p.beyondStop ? 'loss' : 'muted'}">${p.stopLevel ?? '—'}</td>
-            <td class="r num muted">${p.risk != null ? money(p.risk) : '—'}</td>
+            <td class="r num muted">${p.risk != null ? moneyIn(p.risk, p.ccy) : '—'}</td>
             <td class="r num ${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</td>
-            <td class="r num ${cls(p.pnl)}" style="font-weight:600">${p.pnl == null ? '—' : signed(p.pnl)}</td>
+            <td class="r num ${cls(p.pnl)}" style="font-weight:600">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</td>
             <td class="act r">${S.settings.syncUrl ? `<button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
-        ${approx ? `<div class="dim" style="font-size:11px;margin-top:10px">Rows marked <b>approx</b> use IG's contract size because you have no closed trades on that instrument yet, so the currency conversion is unverified. Once one closes, the figure becomes exact.</div>` : ''}
+        ${approx ? `<div class="dim" style="font-size:11px;margin-top:10px">Rows marked <b>approx</b> have no closed trades behind them yet, so the value per point comes from IG's contract size. Those figures are shown in the instrument's own currency${acct ? `, not ${acct}` : ''}, and are left out of the totals above. Once one closes, the figure becomes exact and converts automatically.</div>` : ''}
         <div class="dim" style="font-size:11px;margin-top:8px">These are mark-to-market snapshots, not outcomes. They never touch your win rate, expectancy, R-multiples or equity curve.</div>
       </div></div>` + ordersCard();
       restore();
