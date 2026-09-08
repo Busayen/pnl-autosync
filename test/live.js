@@ -928,6 +928,25 @@ async function ticketChart(browser) {
   const g = k => Number((sell.find(l => l.startsWith(k)) || ':').split(':')[1]);
   check('switching to sell puts the stop above and the target below', g('stop') > g('target'), JSON.stringify(sell));
 
+  // The worker refuses a stop-less order by default, so the form says so before it is sent.
+  await fill('#or-stop', '');
+  await page.waitForTimeout(300);
+  check('an order with no stop is called out before it is sent',
+    /No stop/.test(await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || ''));
+  await fill('#or-stop', '25');
+
+  // a size with a stray digit or two is refused here, before the worker ever sees it
+  await fill('#or-size', '1000000000');
+  await page.waitForTimeout(300);
+  check('an absurd size is refused',
+    await page.evaluate(() => document.querySelector('[data-send]').disabled));
+  check('and it says why', /typo/i.test(await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || '')));
+  await fill('#or-size', '1');
+  await page.waitForTimeout(300);
+  check('a sane size is allowed again',
+    !(await page.evaluate(() => document.querySelector('[data-send]').disabled)));
+
   await page.evaluate(() => document.querySelector('.modal.ticket [data-x]').click());
   await page.waitForTimeout(700);
   check('closing the ticket hands the chart back to the page', await drawn('#chartpanel'));

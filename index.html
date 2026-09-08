@@ -3354,6 +3354,9 @@ if (typeof module !== 'undefined') module.exports = AN;
   // so it sits behind its own token: if a close token leaks the worst case is your positions get
   // shut; an order token that could also open them is a much larger blast radius, and there is no
   // reason to make one key do both.
+  // Not a risk limit — the worker's MAX_ORDER_SIZE is that. This is only a guard against a size
+  // typed with an extra digit or two, which nothing downstream would question.
+  const ORDER_SIZE_CEILING = 10000;
   const orderTokenValue = () => S.settings.orderToken || sessionOrderToken || '';
   let sessionOrderToken = null;
 
@@ -3390,7 +3393,8 @@ if (typeof module !== 'undefined') module.exports = AN;
                 <button class="tab active" data-type="MARKET">Market</button><button class="tab" data-type="LIMIT">Limit</button></span></div>
             <div class="field"><label for="or-size">Size</label><input type="number" id="or-size" step="any" min="0" placeholder="e.g. 1"></div>
             <div class="field hidden" id="or-level-wrap"><label for="or-level">Trigger price</label><input type="number" id="or-level" step="any" placeholder="price to fill at"></div>
-            <div class="field"><label for="or-stop">Stop distance (points, optional)</label><input type="number" id="or-stop" step="any" min="0" placeholder="none"></div>
+            <div class="field"><label for="or-stop">Stop distance (points)</label><input type="number" id="or-stop" step="any" min="0" placeholder="required by default">
+              <div class="help">The worker refuses an order with no stop unless it is set to allow them.</div></div>
             <div class="field"><label for="or-limit">Target distance (points, optional)</label><input type="number" id="or-limit" step="any" min="0" placeholder="none"></div>
             ${orderTokenValue() ? '' : `<div class="field full"><label for="or-tok">Order token</label>
               <input type="password" id="or-tok" placeholder="the ORDER_TOKEN set on your worker" autocomplete="off">
@@ -3495,12 +3499,20 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (!epic || !isFinite(size) || size <= 0) {
         summary.textContent = 'Fill in an instrument and a size.'; send.disabled = true; return;
       }
+      // A fat finger on the size is the one typo here that cannot be walked back. The worker's
+      // MAX_ORDER_SIZE is the real policy; this only catches a stray digit before it is sent.
+      if (size > ORDER_SIZE_CEILING) {
+        summary.innerHTML = `<b>${size}</b> looks like a typo — this refuses anything above ${ORDER_SIZE_CEILING}.`
+          + ' Set MAX_ORDER_SIZE on your worker for the limit that actually applies to your account.';
+        send.disabled = true; return;
+      }
       if (type === 'LIMIT' && (!isFinite(level) || level <= 0)) {
         summary.textContent = 'A limit order needs the price to fill at.'; send.disabled = true; return;
       }
       const known = epics.find(e => e.epic === epic);
       const unit = known ? pointValueFor(known.name, epic) : null;
-      const risk = unit && isFinite(stop) && stop > 0 ? ` Risking about <b>${money(stop * unit * size)}</b> if the stop is hit.` : '';
+      const risk = unit && isFinite(stop) && stop > 0 ? ` Risking about <b>${money(stop * unit * size)}</b> if the stop is hit.`
+        : (isFinite(stop) && stop > 0 ? '' : ' <b class="loss">No stop.</b> The worker refuses this unless it is set to allow it.');
       summary.innerHTML = `<b>${dir === 'BUY' ? 'Buy' : 'Sell'} ${size}</b> of <b>${esc(known ? known.name : epic)}</b> `
         + (type === 'MARKET' ? 'at the market price, now.' : `only if it trades at <b>${level}</b>.`)
         + risk + (unit ? '' : ' <span class="dim">No value-per-point known for this instrument, so no risk estimate.</span>');

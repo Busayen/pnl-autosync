@@ -175,16 +175,28 @@ on the price as you type them, so you can see the trade before you send it. `TV`
 chart under it. Naming an instrument is what loads the chart — each new timeframe costs 150 of IG's
 weekly data points, so it does not fetch on every keystroke.
 
-**This needs a worker endpoint that does not ship with the dashboard.** `worker/order-endpoint.js`
-is a reference `POST /order` handler to add to your `ig-sync` worker next to `/close`. Until it is
-deployed the button is there and every order fails. Read that file before deploying it — the IG
-field names are written from the documentation, not from a successful fill, so try it on a demo
-account first.
+**This needs a `POST /order` handler on your worker.** The worker source is kept outside this repo,
+so nothing here can be deployed by accident; the endpoint must exist there or the button fails.
 
 It uses **its own secret**, `ORDER_TOKEN`, separate from `CLOSE_TOKEN`. A leaked close token can
 only shut positions; one that could also open them is a far larger blast radius, and nothing is
-gained by making one key do both. Set both on the worker, and set `MAX_ORDER_SIZE` there too if you
-want a ceiling a fat finger cannot get past.
+gained by making one key do both. The worker should refuse to run if the three tokens are not
+distinct.
+
+Limits belong on the worker, not in this page, because that is the only place they cannot be
+bypassed by whatever is calling:
+
+| Worker variable | Effect |
+|---|---|
+| `IG_CURRENCY` | Required. Must match the account, e.g. `SGD`. |
+| `REQUIRE_STOP` | Defaults to requiring a stop on every order. `false` permits naked ones. |
+| `GUARANTEED_STOP` | Defaults to guaranteed stops. `false` places ordinary ones. |
+| `MAX_ORDER_SIZE` | Ceiling on size. |
+| `MAX_RISK_POINTS` | Ceiling on stop distance. |
+
+The dashboard refuses a size above 10,000 before sending, but that is a typo guard, not a risk
+limit — `MAX_ORDER_SIZE` is the one that counts. The form marks the stop as required because that
+is the worker's default; if you set `REQUIRE_STOP=false` the field is genuinely optional.
 
 How failures are handled, which is the part worth knowing:
 
@@ -193,8 +205,10 @@ How failures are handled, which is the part worth knowing:
   try again.
 - An order IG **did not confirm** blocks the retry button, because a second attempt would double
   the position. Check the IG app before doing anything else.
-- The idempotency key is minted per dialog, and the reference worker refuses a repeat of the same
-  key for an hour.
+- The idempotency key is minted per dialog, and the worker should refuse a repeat of the same key
+  for an hour. Note that a Workers in-memory guard is per-isolate: it stops a double click, not two
+  requests that happen to land on different isolates. The button disabling itself while a request
+  is in flight is the first line of defence, not the worker.
 
 ---
 
