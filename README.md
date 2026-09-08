@@ -22,6 +22,7 @@ Live: <https://busayen.github.io/pnl/>
 - [Optional: automatic sync with IG](#optional-automatic-sync-with-ig)
 - [Privacy and security](#privacy-and-security)
 - [Hosting your own copy](#hosting-your-own-copy)
+- [Testing](#testing)
 - [How it is built](#how-it-is-built)
 - [Adapting it to another broker](#adapting-it-to-another-broker)
 - [Limitations](#limitations)
@@ -290,6 +291,23 @@ GitHub Pages, free:
 
 Any static host works — Netlify, Cloudflare Pages, an S3 bucket, or just opening the file locally.
 There is no build step because there is nothing to build.
+
+---
+
+## Testing
+
+Two harnesses drive a real Chromium against the file.
+
+```sh
+npm i -D playwright && npx playwright install chromium
+node test/stress.js      # parsing, injection, exports, layout, palette, storage, a11y
+node test/live.js        # positions, orders, closing, FX, the candle chart on desktop and phone
+```
+
+`live.js` stands up a mock IG worker on the page's own origin, so the fetch/render/close/chart
+path is exercised end to end without touching a real account. Both take an optional path
+argument, exit non-zero on failure and name each one. Worth running against any new version
+before publishing it.
 
 ---
 
