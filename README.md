@@ -7,7 +7,7 @@ heatmap calendar, R-multiples, session analysis, risk-rule adherence and confide
 
 No build step. No server. No account. Open the file and it works.
 
-Live: <https://busayen.github.io/pnl/>
+Live: <https://busayen.github.io/pnl-autosync/>
 
 ---
 
@@ -49,7 +49,7 @@ It runs entirely in your browser. Data is stored in `localStorage` and never upl
 
 ## Quick start
 
-1. Open <https://busayen.github.io/pnl/> (or your own copy).
+1. Open <https://busayen.github.io/pnl-autosync/> (or your own copy).
 2. Click **Load demo trades** to see everything populated.
 3. When you are ready, **Import** your own broker CSV.
 
