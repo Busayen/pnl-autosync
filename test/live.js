@@ -334,12 +334,25 @@ async function candleChart(browser, viewport, touch) {
     await page.evaluate(() => document.querySelector('[data-zoom="all"]').click()); await page.waitForTimeout(350);
     const all = await win();
     check('desktop: All shows every candle', all.bars >= all.total, `${all.bars} of ${all.total}`);
-    // fully zoomed out, the wheel belongs to the page again
-    await page.evaluate(() => { window.__pd = null;
-      document.querySelector('#c-pos').addEventListener('wheel', e => { window.__pd = e.defaultPrevented; }, { passive: true, once: true }); });
-    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
-    await page.mouse.wheel(0, 250); await page.waitForTimeout(300);
-    check('desktop: the chart stops eating scroll at full zoom-out', (await page.evaluate(() => window.__pd)) === false);
+    // Fully zoomed out, the wheel belongs to the page again. Asserted on defaultPrevented rather
+    // than on the page actually moving: whether there is scroll room left depends on layout
+    // height, which made this flaky.
+    // Dispatched rather than driven by the mouse: after a sequence of drags the canvas can sit
+    // outside the viewport, and a pointer aimed off-screen produces no wheel event at all, which
+    // made this flaky. What is under test is the handler's decision to swallow the gesture or not,
+    // and a synthetic cancelable wheel exercises exactly that.
+    const swallowed = async () => page.evaluate(() => {
+      const cv = document.querySelector('#c-pos');
+      const ch = Chart.getChart(cv), a = ch.chartArea, r = cv.getBoundingClientRect();
+      const ev = new WheelEvent('wheel', { deltaY: 250, cancelable: true, bubbles: true,
+        clientX: r.left + (a.left + a.right) / 2, clientY: r.top + (a.top + a.bottom) / 2 });
+      cv.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    });
+    check('desktop: the chart stops eating scroll at full zoom-out', (await swallowed()) === false);
+    await page.evaluate(() => document.querySelector('[data-zoom="fit"]')?.click());
+    await page.waitForTimeout(350);
+    check('desktop: but it does take the wheel while there is room to zoom', (await swallowed()) === true);
   } else {
     check('phone: vertical swipes are left to the page', 
       (await page.evaluate(() => getComputedStyle(document.querySelector('#c-pos')).touchAction)) === 'pan-y');
@@ -531,6 +544,74 @@ async function appSideStops(browser) {
   await page.context().close();
 }
 
+// A trailing level is derived from the best price seen, so it must ratchet one way only — and
+// polling can only observe a high at or below the real one, which is why it runs looser than a
+// broker's trail. What must not happen is it giving ground.
+async function trailingStops(browser) {
+  const at = (bid, offer, dir) => { state = { orders: [], positions: [{ dealId: 'D1', epic: 'E',
+    market: 'US 500', direction: dir || 'BUY', size: 2, level: dir === 'SELL' ? 5200 : 5000,
+    bid, offer, stopLevel: dir === 'SELL' ? 5300 : 4900, contractSize: 1, currency: 'USD' }] }; };
+  const closes = () => calls.filter(c => c.p === '/close');
+  const stop = page => page.evaluate(() => { const st = JSON.parse(localStorage.getItem('ledger:v4')).settings.softStops?.D1;
+    return st && { price: st.price, anchor: st.trail && st.trail.anchor }; });
+  const armTrail = async (page, by) => {
+    await page.evaluate(() => document.querySelector('[data-softstop]')?.click());
+    await page.waitForTimeout(400);
+    await page.evaluate(() => document.querySelector('#ss-mode [data-mode="trail"]')?.click());
+    await page.waitForTimeout(200);
+    await page.fill('#ss-trailby', String(by));
+    await page.waitForTimeout(150);
+    const preview = await page.evaluate(() => document.querySelector('#ss-dist')?.textContent || '');
+    await page.evaluate(() => document.querySelector('[data-arm]')?.click());
+    await page.waitForTimeout(700);
+    return preview;
+  };
+
+  at(5100, 5101);
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.closeToken = 'CLOSETOK'; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+
+  const preview = await armTrail(page, 20);
+  check('the preview says which way a long trail can move', /only move up/.test(preview), preview.slice(0, 90));
+  const a0 = await stop(page);
+  check('a long trail starts one distance below the price', a0 && a0.price === 5080, JSON.stringify(a0));
+  calls = [];
+  at(5180, 5181); await page.waitForTimeout(3200);
+  const a1 = await stop(page);
+  check('it follows the price up', a1.price === 5160 && a1.anchor === 5180, JSON.stringify(a1));
+  at(5165, 5166); await page.waitForTimeout(3200);
+  const a2 = await stop(page);
+  check('it does not give ground when price falls back', a2.price === 5160 && a2.anchor === 5180, JSON.stringify(a2));
+  check('and does not fire above the trailed level', closes().length === 0, `${closes().length} sends`);
+  at(5158, 5159); await page.waitForTimeout(4000);
+  check('it fires once through the trailed level', closes().length === 1, `${closes().length} sends`);
+
+  // the short side has to mirror it exactly
+  at(5100, 5101, 'SELL');
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1600);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+  const p2 = await armTrail(page, 20);
+  check('the preview says which way a short trail can move', /only move down/.test(p2), p2.slice(0, 90));
+  const b0 = await stop(page);
+  check('a short trail starts one distance above the price', b0 && b0.price === 5121, JSON.stringify(b0));
+  calls = [];
+  at(5060, 5061, 'SELL'); await page.waitForTimeout(3200);
+  const b1 = await stop(page);
+  check('it follows the price down', b1.price === 5081 && b1.anchor === 5061, JSON.stringify(b1));
+  at(5075, 5076, 'SELL'); await page.waitForTimeout(3200);
+  check('it holds when a short bounces back', (await stop(page)).price === 5081, JSON.stringify(await stop(page)));
+  check('and does not fire below the trailed level', closes().length === 0, `${closes().length} sends`);
+  at(5082, 5083, 'SELL'); await page.waitForTimeout(4000);
+  check('it fires once through the short trailed level', closes().length === 1, `${closes().length} sends`);
+  check('no page errors through the trailing paths', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -544,7 +625,7 @@ async function appSideStops(browser) {
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
       ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
       ['live bar + TradingView', liveCandleAndTv],
-      ['app-side stops', appSideStops]]) {
+      ['app-side stops', appSideStops], ['trailing stops', trailingStops]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }

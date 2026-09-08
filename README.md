@@ -177,6 +177,19 @@ well past your level. It sends a market order, so it slips like any other.
 
 It is a convenience on top of a broker stop, **never a replacement for one**.
 
+### Fixed or trailing
+
+A **fixed** stop sits at the price you name. A **trailing** one sits a distance behind the best
+price the tab has seen and ratchets one way only — up for a long, down for a short — never giving
+ground.
+
+Trailing is the weaker of the two, for a reason worth understanding. A fixed stop only suffers
+detection lag: the level is known, so the error is however far price travels past it between polls.
+A trailing stop also *derives* its level from the highest price it has observed, and polling can
+only ever see a high at or below the real one. So the anchor sits low and the detection is late,
+and the two compound. An app-side trail is therefore always looser than a broker's, never tighter.
+The armed panel shows the anchor it is working from, so you can see what it has actually seen.
+
 Practicalities:
 
 - It needs a **close token saved in Settings**, or it can arm but never fire. The dialog says so.

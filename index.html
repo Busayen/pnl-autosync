@@ -3145,6 +3145,19 @@ if (typeof module !== 'undefined') module.exports = AN;
   // A long exits at the bid and a short at the offer, which is exactly what p.cur already holds.
   const stopHit = (p, st) => p.cur != null && (p.long ? p.cur <= st.price : p.cur >= st.price);
 
+  // A trailing level is derived from the best price this tab has *seen*, and polling can only ever
+  // observe a high at or below the real one — so an app-side trail always sits looser than a
+  // broker's, never tighter. It ratchets one way and never gives ground.
+  function trailStop(p, st) {
+    if (!st.trail || p.cur == null) return false;
+    const t = st.trail;
+    const better = t.anchor == null || (p.long ? p.cur > t.anchor : p.cur < t.anchor);
+    if (better) t.anchor = p.cur;
+    const want = p.long ? t.anchor - t.distance : t.anchor + t.distance;
+    if (p.long ? want > st.price : want < st.price) { st.price = Math.round(want * 1e6) / 1e6; return true; }
+    return false;
+  }
+
   function checkSoftStops() {
     const stops = softStops();
     if (!Array.isArray(S.positions)) return;
@@ -3155,6 +3168,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     for (const p of S.positions) {
       const st = stops[p.dealId];
       if (!st || st.state !== 'armed') continue;
+      if (trailStop(p, st)) dirty = true;      // move the level up before testing it
       if (stopHit(p, st)) fireSoftStop(p, st);
     }
     if (dirty) persist();
@@ -3221,8 +3235,15 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div class="kv" style="margin-top:12px"><span>Now</span><b class="num">${p.cur != null ? p.cur : '—'}</b></div>
           <div class="kv"><span>Direction</span><b>${p.long ? 'Long — closes when the bid falls to your level' : 'Short — closes when the offer rises to your level'}</b></div>
           <div class="kv"><span>IG stop</span><b class="num">${p.stopLevel ?? 'none set'}</b></div>
-          <div class="field" style="margin-top:14px"><label for="ss-price">Close at</label>
-            <input type="number" id="ss-price" step="any" value="${existing ? existing.price : ''}" placeholder="${p.cur != null ? p.cur : 'price'}" autocomplete="off"></div>
+          <div class="field full" style="margin-top:14px"><label>Type</label>
+            <span class="tabs" id="ss-mode">
+              <button class="tab ${existing && existing.trail ? '' : 'active'}" data-mode="fixed">Fixed price</button>
+              <button class="tab ${existing && existing.trail ? 'active' : ''}" data-mode="trail">Trailing</button>
+            </span></div>
+          <div class="field" id="ss-fixed-wrap"><label for="ss-price">Close at</label>
+            <input type="number" id="ss-price" step="any" value="${existing && !existing.trail ? existing.price : ''}" placeholder="${p.cur != null ? p.cur : 'price'}" autocomplete="off"></div>
+          <div class="field hidden" id="ss-trail-wrap"><label for="ss-trailby">Trail by (points)</label>
+            <input type="number" id="ss-trailby" step="any" min="0" value="${existing && existing.trail ? existing.trail.distance : ''}" placeholder="e.g. 8" autocomplete="off"></div>
           <div class="help" id="ss-dist"></div>
           ${closeTokenValue() ? '' : '<div class="notice" style="margin-top:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>No close token is saved, so this stop could arm but never fire. Save one in Settings first.</div></div>'}
           <div class="err" id="ss-err" style="margin-top:10px"></div>
@@ -3237,26 +3258,59 @@ if (typeof module !== 'undefined') module.exports = AN;
     const done = () => wrap.remove();
     wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
     const input = wrap.querySelector('#ss-price'), err = wrap.querySelector('#ss-err'), dist = wrap.querySelector('#ss-dist');
+    const trailBy = wrap.querySelector('#ss-trailby');
+    let mode = existing && existing.trail ? 'trail' : 'fixed';
+    const risk = away => p.unit ? ` · about ${money(away * p.unit * p.size)} at risk` : '';
     const describe = () => {
+      wrap.querySelector('#ss-fixed-wrap').classList.toggle('hidden', mode !== 'fixed');
+      wrap.querySelector('#ss-trail-wrap').classList.toggle('hidden', mode !== 'trail');
+      if (p.cur == null) { dist.textContent = ''; return; }
+      if (mode === 'trail') {
+        const d = parseFloat(trailBy.value);
+        if (!isFinite(d) || d <= 0) { dist.textContent = 'How far behind the best price the stop should sit.'; return; }
+        const lvl = p.long ? p.cur - d : p.cur + d;
+        dist.innerHTML = `Starts at <b>${lvl.toFixed(dp)}</b>, and follows the best price seen from here${risk(d)}.`
+          + ` <span class="dim">It can only move ${p.long ? 'up' : 'down'}, never back.</span>`;
+        return;
+      }
       const v = parseFloat(input.value);
-      if (!isFinite(v) || p.cur == null) { dist.textContent = ''; return; }
+      if (!isFinite(v)) { dist.textContent = ''; return; }
       const away = Math.abs(p.cur - v), wrongSide = p.long ? v >= p.cur : v <= p.cur;
       dist.innerHTML = wrongSide
         ? `<span class="loss">That is on the wrong side of the price — it would fire immediately.</span>`
-        : `${away.toFixed(dp)} away${p.unit ? ` · about ${money(away * p.unit * p.size)} at risk` : ''}`;
+        : `${away.toFixed(dp)} away${risk(away)}`;
     };
-    input.addEventListener('input', describe); describe();
-    setTimeout(() => input.focus(), 30);
+    wrap.querySelectorAll('#ss-mode [data-mode]').forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.mode;
+      wrap.querySelectorAll('#ss-mode [data-mode]').forEach(x => x.classList.toggle('active', x === b));
+      err.textContent = ''; describe();
+      setTimeout(() => (mode === 'trail' ? trailBy : input).focus(), 20);
+    }));
+    input.addEventListener('input', describe);
+    trailBy.addEventListener('input', describe);
+    describe();
+    setTimeout(() => (mode === 'trail' ? trailBy : input).focus(), 30);
     const disarm = wrap.querySelector('[data-disarm]');
     if (disarm) disarm.addEventListener('click', () => { delete softStops()[dealId]; persist(); done(); renderOpen(); if (chartState) renderChartPanel(); toast('App stop removed.'); });
     wrap.querySelector('[data-arm]').addEventListener('click', () => {
-      const v = parseFloat(input.value);
-      if (!isFinite(v) || v <= 0) { err.textContent = 'Enter the price to close at.'; return; }
-      if (p.cur != null && (p.long ? v >= p.cur : v <= p.cur)) { err.textContent = 'That level is already through the price — it would fire straight away.'; return; }
-      softStops()[dealId] = { price: v, dir: p.direction, size: p.size, epic: p.epic || '', market: p.market || '',
+      let price, trail = null;
+      if (mode === 'trail') {
+        const d = parseFloat(trailBy.value);
+        if (!isFinite(d) || d <= 0) { err.textContent = 'Enter how many points to trail by.'; return; }
+        if (p.cur == null) { err.textContent = 'No live price yet, so a trail has nothing to follow.'; return; }
+        price = p.long ? p.cur - d : p.cur + d;
+        trail = { distance: d, anchor: p.cur };
+      } else {
+        price = parseFloat(input.value);
+        if (!isFinite(price) || price <= 0) { err.textContent = 'Enter the price to close at.'; return; }
+        if (p.cur != null && (p.long ? price >= p.cur : price <= p.cur)) { err.textContent = 'That level is already through the price — it would fire straight away.'; return; }
+      }
+      softStops()[dealId] = { price: Math.round(price * 1e6) / 1e6, dir: p.direction, size: p.size,
+                              epic: p.epic || '', market: p.market || '', trail,
                               key: (existing && existing.key) || newKey(), state: 'armed', armedAt: new Date().toISOString() };
       persist(); done(); renderOpen(); if (chartState) renderChartPanel(); startAuto();
-      toast(`App stop armed at ${v}. It works only while this tab is open.`, 8000);
+      toast(trail ? `Trailing stop armed ${trail.distance} behind, at ${price}. It works only while this tab is open.`
+                  : `App stop armed at ${price}. It works only while this tab is open.`, 8000);
     });
   }
 
@@ -3989,7 +4043,8 @@ if (typeof module !== 'undefined') module.exports = AN;
             { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
             { value: p.stopLevel, label: 'stop', color: cssVar('--loss'), dash: [5, 4] },
             // the app-side stop is drawn apart from IG's so the two are never confused
-            ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price, label: 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
+            ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price,
+                label: softStops()[p.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
             { value: p.limitLevel, label: 'target', color: cssVar('--profit'), dash: [5, 4] },
             { value: p.cur, label: 'now', color: cssVar('--accent'), text: cssVar('--accent-text'), width: 1.5 },
           ] },
@@ -4060,7 +4115,7 @@ if (typeof module !== 'undefined') module.exports = AN;
             <td class="r num ${cls(p.pnl)}" style="font-weight:600">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</td>
             <td class="act r">${S.settings.syncUrl ? `${(() => { const st = softStops()[p.dealId];
                 const cls = !st ? 'ghost' : st.state === 'armed' ? 'ghost armed' : st.state === 'firing' ? 'ghost armed' : 'ghost danger';
-                const label = !st ? 'Stop' : st.state === 'firing' ? 'firing…' : st.state === 'error' ? 'stop failed' : st.state === 'unconfirmed' ? 'unconfirmed' : `stop ${st.price}`;
+                const label = !st ? 'Stop' : st.state === 'firing' ? 'firing…' : st.state === 'error' ? 'stop failed' : st.state === 'unconfirmed' ? 'unconfirmed' : `${st.trail ? 'trail' : 'stop'} ${st.price}`;
                 const title = st && st.note ? esc(st.note) : 'Set an app-side stop: this tab watches the price and closes the position when it is reached';
                 return `<button class="btn ${cls} sm" data-softstop="${esc(p.dealId)}" title="${title}">${esc(label)}</button>`; })()}
               <button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
@@ -4073,7 +4128,9 @@ if (typeof module !== 'undefined') module.exports = AN;
           if (!stops.length) return '';
           const bad = stops.filter(([, st]) => st.state === 'error' || st.state === 'unconfirmed');
           const live = stops.filter(([, st]) => st.state === 'armed' || st.state === 'firing');
+          const trails = live.filter(([, st]) => st.trail);
           return (bad.length ? `<div class="notice" style="margin-top:10px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${bad.map(([, st]) => `<b>${esc(st.market || 'Position')}</b>: ${esc(st.note || 'the app stop did not complete')}`).join('<br>')}</div></div>` : '')
+            + (trails.length ? `<div class="dim" style="font-size:11px;margin-top:8px">${trails.map(([, st]) => `<b>${esc(st.market || 'Position')}</b> trailing ${st.trail.distance} behind ${st.trail.anchor != null ? `the best seen (${st.trail.anchor})` : 'the price'} · now at ${st.price}`).join('<br>')}</div>` : '')
             + (live.length ? `<div class="dim" style="font-size:11px;margin-top:8px">${plural(live.length, 'app stop')} armed. <b>They only work while this tab is open and online</b> — a closed tab, a sleeping machine or a gap through the level means no stop. Keep a broker stop as the real protection.</div>` : '');
         })()}
         <div class="dim" style="font-size:11px;margin-top:8px">These are mark-to-market snapshots, not outcomes. They never touch your win rate, expectancy, R-multiples or equity curve.</div>
