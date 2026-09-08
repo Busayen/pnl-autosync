@@ -18,6 +18,7 @@ Live: <https://busayen.github.io/pnl-autosync/>
 - [Getting your data in](#getting-your-data-in)
 - [The five sections](#the-five-sections)
 - [Concepts worth understanding](#concepts-worth-understanding)
+- [Placing orders](#placing-orders)
 - [App-side stops](#app-side-stops)
 - [Settings reference](#settings-reference)
 - [Optional: automatic sync with IG](#optional-automatic-sync-with-ig)
@@ -161,6 +162,34 @@ roughly 57–93%. The interval is the finding; the point estimate is not.
 
 There is no fixed daily loss limit, because with guaranteed stops the deposit *is* the limit.
 Instead the app reports how much of each session's capital was consumed at its worst point.
+
+---
+
+## Placing orders
+
+**New order** on the Open section opens a position on IG: **Market** fills now, **Limit** rests
+until the price trades at your level. Both take an optional stop and target distance.
+
+**This needs a worker endpoint that does not ship with the dashboard.** `worker/order-endpoint.js`
+is a reference `POST /order` handler to add to your `ig-sync` worker next to `/close`. Until it is
+deployed the button is there and every order fails. Read that file before deploying it — the IG
+field names are written from the documentation, not from a successful fill, so try it on a demo
+account first.
+
+It uses **its own secret**, `ORDER_TOKEN`, separate from `CLOSE_TOKEN`. A leaked close token can
+only shut positions; one that could also open them is a far larger blast radius, and nothing is
+gained by making one key do both. Set both on the worker, and set `MAX_ORDER_SIZE` there too if you
+want a ceiling a fat finger cannot get past.
+
+How failures are handled, which is the part worth knowing:
+
+- The order is only called placed when **IG confirms** it, never on the request returning 200.
+- A **rejection** (insufficient funds, market closed) changed nothing, so it is shown and you can
+  try again.
+- An order IG **did not confirm** blocks the retry button, because a second attempt would double
+  the position. Check the IG app before doing anything else.
+- The idempotency key is minted per dialog, and the reference worker refuses a repeat of the same
+  key for an hour.
 
 ---
 

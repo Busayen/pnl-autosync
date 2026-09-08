@@ -45,6 +45,11 @@ function serve(dir) {
         px = c;
       }
       return json(200, { candles: out, allowance: { remaining: 9400, total: 10000 }, cached: false }); }
+    if (p === '/order' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c);
+      return req.on('end', () => { calls.push({ p, body, auth: req.headers.authorization || null });
+        return state.orderStatus && state.orderStatus !== 200 ? json(state.orderStatus, state.orderBody || { error: 'order failed' })
+          : json(200, state.orderBody || { dealStatus: 'ACCEPTED', dealId: 'NEW1', level: 5100 }); }); }
     if (p === '/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c);
       return req.on('end', () => { calls.push({ p, body, auth: req.headers.authorization || null });
@@ -612,6 +617,91 @@ async function trailingStops(browser) {
   await page.context().close();
 }
 
+// Opening a position is the only thing here that can create exposure, so it gets its own token and
+// the same never-claim-success-early handling as a close — plus one difference that matters: an
+// unconfirmed OPEN must not be retryable, because a second attempt doubles the position.
+async function placingOrders(browser) {
+  const orders = () => calls.filter(c => c.p === '/order');
+  const fill = async page => {
+    await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
+    await page.waitForTimeout(400);
+    await page.fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+    await page.fill('#or-size', '2');
+    await page.waitForTimeout(250);
+  };
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid: 5100, offer: 5101, stopLevel: 4900,
+    contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.orderToken = 'ORDTOK'; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+
+  check('there is a way to place an order', await page.evaluate(() => !!document.querySelector('[data-neworder]')));
+  await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
+  await page.waitForTimeout(400);
+  check('it cannot be sent before it is filled in', await page.evaluate(() => document.querySelector('[data-send]')?.disabled) === true);
+  check('epics the account has traded are offered',
+    (await page.evaluate(() => Array.from(document.querySelectorAll('#or-epics option')).map(o => o.value))).includes('IX.D.SPTRD.IFE.IP'));
+  await page.fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+  await page.fill('#or-size', '2');
+  await page.waitForTimeout(300);
+  check('the summary reads the order back', /Buy 2 of US 500 at the market price/.test(
+    await page.evaluate(() => document.querySelector('#or-summary')?.innerText || '')));
+  await page.evaluate(() => document.querySelector('#or-type [data-type="LIMIT"]')?.click());
+  await page.waitForTimeout(250);
+  check('a limit order will not send without a level', await page.evaluate(() => document.querySelector('[data-send]')?.disabled) === true);
+  await page.fill('#or-level', '5050'); await page.waitForTimeout(250);
+  check('with a level, the summary says it is conditional', /only if it trades at/.test(
+    await page.evaluate(() => document.querySelector('#or-summary')?.innerText || '')));
+  await page.evaluate(() => document.querySelector('#or-type [data-type="MARKET"]')?.click());
+  await page.waitForTimeout(250);
+
+  calls = [];
+  await page.evaluate(() => { const b = document.querySelector('[data-send]'); b.click(); b.click(); b.click(); });
+  await page.waitForTimeout(1800);
+  check('three clicks place exactly one order', orders().length === 1, `${orders().length} sends`);
+  const body = orders()[0] ? JSON.parse(orders()[0].body) : {};
+  check('the order says what it is', body.epic === 'IX.D.SPTRD.IFE.IP' && body.direction === 'BUY' && body.size === 2 && body.orderType === 'MARKET', JSON.stringify(body));
+  check('it carries an idempotency key', !!body.idempotencyKey);
+  check('it uses the order token, not the close token', orders()[0] && orders()[0].auth === 'Bearer ORDTOK', orders()[0] && orders()[0].auth);
+  check('success is only claimed on IG confirming', /IG confirmed/.test(
+    await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
+
+  // a rejection changed nothing, so retrying is fine
+  state = { ...state, orderBody: { dealStatus: 'REJECTED', reason: 'INSUFFICIENT_FUNDS' } };
+  await page.waitForTimeout(500);
+  await fill(page); calls = [];
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(1400);
+  check('a rejected order is reported and can be retried', await page.evaluate(() =>
+    /rejected/i.test(document.querySelector('#or-err')?.textContent || '') && !document.querySelector('[data-send]')?.disabled));
+
+  // an unconfirmed OPEN must not be retryable — this is the one that differs from a close
+  state = { ...state, orderBody: { dealStatus: 'UNCONFIRMED', reason: 'no confirmation' } };
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(1400);
+  check('an unconfirmed order blocks a retry', await page.evaluate(() => !!document.querySelector('[data-send]')?.disabled));
+  await page.evaluate(() => document.querySelector('[data-x]')?.click());
+  await page.waitForTimeout(300);
+
+  // and nothing is sent without the token
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.orderToken = ''; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+  await fill(page); calls = [];
+  check('without a saved token it asks for one', await page.evaluate(() => !!document.querySelector('#or-tok')));
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(800);
+  check('and sends nothing until it has one', orders().length === 0, `${orders().length} sends`);
+  check('no page errors through the order paths', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -625,7 +715,8 @@ async function trailingStops(browser) {
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
       ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
       ['live bar + TradingView', liveCandleAndTv],
-      ['app-side stops', appSideStops], ['trailing stops', trailingStops]]) {
+      ['app-side stops', appSideStops], ['trailing stops', trailingStops],
+      ['placing orders', placingOrders]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }
