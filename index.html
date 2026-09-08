@@ -979,6 +979,34 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 #chartpanel { margin-top: 20px; }
 #chartpanel .cw.tall { height: 340px; }
 @media (max-width: 760px) { #chartpanel .cw.tall { height: 240px; } #chartpanel .tbl-tools { width: 100%; } }
+
+.zoomctl { display: inline-flex; gap: 4px; align-items: center; }
+.zoomctl .btn.icon { font-size: 15px; font-weight: 600; line-height: 1; }
+#chartpanel canvas { cursor: grab; touch-action: none; }
+#chartpanel canvas:active { cursor: grabbing; }
+
+.indctl { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+.indctl .tab { height: 24px; padding: 0 8px; font-size: 10.5px; }
+.ohlc { display: flex; gap: 14px; align-items: center; padding: 0 16px 8px; font-size: 11.5px; color: var(--text-3); flex-wrap: wrap; }
+.ohlc .t { color: var(--text-2); font-weight: 600; }
+.ohlc i { font-style: normal; opacity: .7; }
+.ohlc b { font-variant-numeric: tabular-nums; }
+#chartpanel .cw.sub { height: 84px; }
+@media (max-width: 760px) {
+  .indctl .tab { height: 22px; padding: 0 6px; font-size: 10px; }
+  .ohlc { gap: 9px; font-size: 10.5px; padding: 0 12px 6px; }
+  #chartpanel .cw.sub { height: 64px; }
+}
+
+/* Chart header: on a phone the dropdown already holds every timeframe, so the quick buttons
+   are redundant and cost a whole row. */
+@media (max-width: 760px) {
+  #chartcard .tabs { display: none; }
+  #chartcard .select.sm select { min-width: 88px; }
+  #chartcard .card-head { flex-wrap: wrap; gap: 8px; }
+  #chartcard .tbl-tools { gap: 6px; }
+}
+#chartcard .select.sm select { height: 28px; font-size: 12px; padding: 0 26px 0 10px; }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -3113,12 +3141,84 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
 
 
+
+  // ---- indicators ----
+  // Plain maths over the candle closes; no extra library. Kept small and explicit so the
+  // numbers can be checked against any other charting package.
+  function sma(vals, n) {
+    const out = new Array(vals.length).fill(null); let sum = 0;
+    for (let i = 0; i < vals.length; i++) { sum += vals[i]; if (i >= n) sum -= vals[i - n]; if (i >= n - 1) out[i] = sum / n; }
+    return out;
+  }
+  function ema(vals, n) {
+    const out = new Array(vals.length).fill(null), k = 2 / (n + 1);
+    let prev = null;
+    for (let i = 0; i < vals.length; i++) {
+      prev = prev == null ? (i >= n - 1 ? vals.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n : null)
+                          : vals[i] * k + prev * (1 - k);
+      out[i] = prev;
+    }
+    return out;
+  }
+  function rsi(vals, n = 14) {
+    const out = new Array(vals.length).fill(null);
+    let g = 0, l = 0;
+    for (let i = 1; i < vals.length; i++) {
+      const d = vals[i] - vals[i - 1], up = Math.max(0, d), dn = Math.max(0, -d);
+      if (i <= n) { g += up; l += dn; if (i === n) { g /= n; l /= n; out[i] = (g === 0 && l === 0) ? 50 : l === 0 ? 100 : 100 - 100 / (1 + g / l); } }
+      else { g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n; out[i] = (g === 0 && l === 0) ? 50 : l === 0 ? 100 : 100 - 100 / (1 + g / l); }
+    }
+    return out;
+  }
+  const INDICATORS = [
+    { k: 'ema20', label: 'EMA 20', fn: r => ema(r.map(c => c.c), 20), color: () => '#f59e0b' },
+    { k: 'ema50', label: 'EMA 50', fn: r => ema(r.map(c => c.c), 50), color: () => '#3b82f6' },
+    { k: 'sma200', label: 'SMA 200', fn: r => sma(r.map(c => c.c), 200), color: () => '#a78bfa' },
+    { k: 'vol', label: 'Volume', overlay: false },
+    { k: 'rsi', label: 'RSI 14', overlay: false },
+  ];
+
+  // Crosshair with an OHLC readout, the thing most missed from a real charting package.
+  const crosshair = {
+    id: 'crosshair',
+    afterDatasetsDraw(chart, args, opts) {
+      const pos = opts && opts.pos; if (!pos) return;
+      const { ctx, chartArea: a, scales: { x, y } } = chart;
+      if (pos.x < a.left || pos.x > a.right) return;
+      ctx.save();
+      ctx.setLineDash([3, 3]); ctx.lineWidth = 1; ctx.strokeStyle = opts.color || 'rgba(255,255,255,.35)';
+      ctx.beginPath(); ctx.moveTo(pos.x, a.top); ctx.lineTo(pos.x, a.bottom);
+      ctx.moveTo(a.left, pos.y); ctx.lineTo(a.right, pos.y); ctx.stroke();
+      ctx.setLineDash([]);
+      const price = y.getValueForPixel(pos.y);
+      const label = price.toFixed(opts.dp ?? 2);
+      ctx.font = '600 10px Inter, system-ui, sans-serif';
+      const w = ctx.measureText(label).width + 10;
+      ctx.fillStyle = opts.color || '#555'; ctx.fillRect(a.right - w, pos.y - 8, w, 16);
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, a.right - w + 5, pos.y);
+      ctx.restore();
+    },
+  };
+
   // ---- position chart ----
   // Candles come from IG's historical endpoint, which is capped at 10,000 points a WEEK, so
   // they are fetched once per open and never polled. The live price line is driven by the
   // position feed that is already running, which costs nothing extra.
   let chartState = null;
-  const RES_CHOICES = [['MINUTE', '1m'], ['MINUTE_5', '5m'], ['MINUTE_15', '15m'], ['HOUR', '1h'], ['DAY', '1D']];
+  // Every resolution IG exposes, labelled the way a charting package would. Anything not in
+  // this list is rejected by the worker, so the two must stay in step.
+  const RES_CHOICES = [
+    ['SECOND', '1s'], ['MINUTE', '1m'], ['MINUTE_2', '2m'], ['MINUTE_3', '3m'], ['MINUTE_5', '5m'],
+    ['MINUTE_10', '10m'], ['MINUTE_15', '15m'], ['MINUTE_30', '30m'],
+    ['HOUR', '1h'], ['HOUR_2', '2h'], ['HOUR_3', '3h'], ['HOUR_4', '4h'],
+    ['DAY', '1D'], ['WEEK', '1W'], ['MONTH', '1M'],
+  ];
+  // Shown as buttons; the rest live in the dropdown so the row stays usable on a phone.
+  const RES_QUICK = ['MINUTE', 'MINUTE_5', 'MINUTE_15', 'HOUR', 'DAY'];
+  // Each fetch costs 150 of IG's 10,000 weekly points, so a resolution already seen this
+  // session is served from memory instead of being bought again.
+  const candleCache = new Map();
+  const candleKey = (epic, res) => `${epic}|${res}`;
 
   // Chart.js has no candlestick type; floating bars give wicks and bodies with no extra library.
   const levelLines = {
@@ -3127,18 +3227,37 @@ if (typeof module !== 'undefined') module.exports = AN;
       const { ctx, chartArea: a, scales: { y } } = chart;
       if (!a || !opts || !opts.lines) return;
       ctx.save();
-      for (const ln of opts.lines) {
-        if (ln.value == null || !isFinite(ln.value)) continue;
-        const py = y.getPixelForValue(ln.value);
-        if (py < a.top - 1 || py > a.bottom + 1) continue;
+      // Lines are drawn at their true price, but the labels are nudged apart when levels sit
+      // close together — otherwise "entry" and "now" print on top of each other.
+      const drawn = [];
+      const visible = opts.lines
+        .filter(ln => ln.value != null && isFinite(ln.value))
+        .map(ln => ({ ...ln, py: y.getPixelForValue(ln.value) }))
+        .filter(ln => ln.py >= a.top - 1 && ln.py <= a.bottom + 1)
+        .sort((m, n) => m.py - n.py);
+      for (const ln of visible) {
         ctx.beginPath(); ctx.setLineDash(ln.dash || []); ctx.lineWidth = ln.width || 1.25;
-        ctx.strokeStyle = ln.color; ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+        ctx.strokeStyle = ln.color; ctx.moveTo(a.left, ln.py); ctx.lineTo(a.right, ln.py); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.font = '600 10px Inter, system-ui, sans-serif';
+      const H = 16;
+      for (const ln of visible) {
+        let ly = ln.py;
+        const last = drawn.length ? drawn[drawn.length - 1] : null;
+        if (last != null && ly - last < H + 1) ly = last + H + 1;      // stack downward
+        ly = Math.max(a.top + H / 2, Math.min(a.bottom - H / 2, ly));
+        drawn.push(ly);
         const label = `${ln.label} ${ln.value}`;
-        ctx.setLineDash([]); ctx.font = '600 10px Inter, system-ui, sans-serif';
         const w = ctx.measureText(label).width + 10;
-        ctx.fillStyle = ln.color; ctx.fillRect(a.right - w, py - 8, w, 16);
+        // a leader line keeps the nudged label attached to its true price
+        if (Math.abs(ly - ln.py) > 1) {
+          ctx.beginPath(); ctx.lineWidth = 1; ctx.strokeStyle = ln.color;
+          ctx.moveTo(a.right - w - 5, ln.py); ctx.lineTo(a.right - w, ly); ctx.stroke();
+        }
+        ctx.fillStyle = ln.color; ctx.fillRect(a.right - w, ly - H / 2, w, H);
         ctx.fillStyle = ln.text || '#fff'; ctx.textBaseline = 'middle';
-        ctx.fillText(label, a.right - w + 5, py);
+        ctx.fillText(label, a.right - w + 5, ly);
       }
       ctx.restore();
     },
@@ -3148,7 +3267,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     const p = (S.positions || []).find(x => x.dealId === dealId);
     if (!p) return;
     if (!syncBase()) { toast('The chart needs the IG sync worker.'); return; }
-    chartState = { dealId, res: (chartState && chartState.res) || 'MINUTE_5', candles: null, allowance: null, err: null, loading: true };
+    chartState = { dealId, res: (chartState && chartState.res) || 'MINUTE_5', candles: null, allowance: null, err: null, loading: true,
+      ind: (chartState && chartState.ind) || new Set(['ema20']), hover: null };
     renderChartPanel();
     await loadCandles();
   }
@@ -3156,6 +3276,13 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!chartState) return;
     const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
     if (!p || !p.epic) { chartState.err = 'This position has no instrument code, so candles cannot be fetched.'; chartState.loading = false; renderChartPanel(); return; }
+    const ck = candleKey(p.epic, chartState.res);
+    const cached = candleCache.get(ck);
+    if (cached) {                      // already bought this resolution this session
+      chartState.candles = cached.candles; chartState.allowance = cached.allowance;
+      chartState.cached = true; chartState.err = null; chartState.loading = false;
+      renderChartPanel(); return;
+    }
     chartState.loading = true; renderChartPanel();
     try {
       const url = `${syncBase()}/candles?epic=${encodeURIComponent(p.epic)}&resolution=${chartState.res}&max=150`;
@@ -3166,6 +3293,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       chartState.allowance = data.allowance || null;
       chartState.cached = !!data.cached;
       chartState.err = null;
+      candleCache.set(ck, { candles: chartState.candles, allowance: chartState.allowance });
     } catch (e) { chartState.err = String(e.message || e); }
     chartState.loading = false;
     renderChartPanel();
@@ -3180,9 +3308,17 @@ if (typeof module !== 'undefined') module.exports = AN;
     const a = chartState.allowance;
     el.innerHTML = `<div class="card chart wide" id="chartcard">
         <div class="card-head">
-          <div class="card-title">${esc(p.market || p.epic)}<small>${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}${chartState.cached ? ' · cached' : ''}</small></div>
+          <div class="card-title">${esc(p.market || p.epic)}<small>${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}${chartState.cached ? ' · from cache' : ''}</small></div>
           <div class="tbl-tools">
-            <span class="tabs">${RES_CHOICES.map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
+            <span class="tabs">${RES_CHOICES.filter(([k]) => RES_QUICK.includes(k)).map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
+            <span class="select sm"><select id="res-more" aria-label="Timeframe">${RES_CHOICES.map(([k, l]) => `<option value="${k}" ${chartState.res === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>
+            <span class="indctl">${INDICATORS.map(i => `<button class="tab ${chartState.ind.has(i.k) ? 'active' : ''}" data-ind="${i.k}">${i.label}</button>`).join('')}</span>
+            <span class="zoomctl">
+              <button class="btn ghost icon sm" data-zoom="out" aria-label="Zoom out" title="Zoom out">−</button>
+              <button class="btn ghost icon sm" data-zoom="in" aria-label="Zoom in" title="Zoom in">+</button>
+              <button class="btn ghost sm" data-zoom="levels" title="Frame entry, stop and target">Levels</button>
+              <button class="btn ghost sm" data-zoom="all" title="Show every candle">All</button>
+            </span>
             <button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </div>
         </div>
@@ -3192,14 +3328,173 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div><span class="k">Stop / target</span><b class="num">${p.stopLevel ?? '—'} <span class="dim">/</span> ${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
           <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
         </div>
+        <div class="ohlc" id="ohlc">${(() => {
+          const h = chartState.hover, rows = chartState.candles || [];
+          const c = h != null && rows[h] ? rows[h] : rows[rows.length - 1];
+          if (!c) return '';
+          const dpv = Math.abs(c.c) < 10 ? 5 : Math.abs(c.c) < 1000 ? 3 : 2;
+          const dir = c.c >= c.o ? 'profit' : 'loss';
+          return `<span class="t">${esc((c.t || '').replace('T', ' ').slice(0, 16))}</span>`
+            + ['O', 'H', 'L', 'C'].map((k, i) => `<span><i>${k}</i> <b class="${dir}">${[c.o, c.h, c.l, c.c][i].toFixed(dpv)}</b></span>`).join('')
+            + (c.v != null ? `<span><i>V</i> <b>${c.v}</b></span>` : '');
+        })()}</div>
         ${chartState.err ? `<div class="card-body"><div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(chartState.err)}</div></div></div>`
-          : `<div class="cw tall" style="padding:0 10px 6px"><canvas id="c-pos"></canvas></div>`}
-        <div class="dim" style="font-size:11px;padding:0 16px 12px">${chartState.loading ? 'Loading candles…' : ''}${a ? `IG historical allowance: ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left this week. Candles are fetched once per view; the price line updates from the position feed.` : ''}</div>
+          : `<div class="cw tall" style="padding:0 10px 2px"><canvas id="c-pos"></canvas></div>
+             ${chartState.ind.has('vol') ? '<div class="cw sub" style="padding:0 10px 2px"><canvas id="c-vol"></canvas></div>' : ''}
+             ${chartState.ind.has('rsi') ? '<div class="cw sub" style="padding:0 10px 6px"><canvas id="c-rsi"></canvas></div>' : ''}`}
+        <div class="dim" style="font-size:11px;padding:0 16px 12px">${chartState.loading ? 'Loading candles…' : ''}${a ? `IG historical allowance: ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left this week. Each timeframe costs 150 points once per session, then comes from cache. The price line updates from the position feed and costs nothing.` : ''}</div>
       </div>`;
-    el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; loadCandles(); }));
+    el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; chartState.y = null; loadCandles(); }));
+    const more = el.querySelector('#res-more');
+    if (more) more.addEventListener('change', () => { chartState.res = more.value; chartState.y = null; loadCandles(); });
+    el.querySelectorAll('[data-ind]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.ind;
+      chartState.ind.has(k) ? chartState.ind.delete(k) : chartState.ind.add(k);
+      renderChartPanel();
+    }));
+    el.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.zoom;
+      if (k === 'in') zoomBy(0.75); else if (k === 'out') zoomBy(1.33); else resetZoom(k === 'all' ? 'all' : null);
+    }));
     el.querySelector('[data-chartclose]').addEventListener('click', closeChart);
     drawPositionChart(p);
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!chartState.shown) { chartState.shown = true; el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  }
+
+
+  // Zoom and pan without a plugin: adjust the y range and redraw. Wheel and pinch scale about
+  // the pointer so the price under your finger stays put; drag moves the window.
+  const Y_SPAN_MIN = 1e-6;
+  function setY(min, max) {
+    if (!chartState || !isFinite(min) || !isFinite(max) || max - min < Y_SPAN_MIN) return;
+    chartState.y = { min, max };
+    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (p) drawPositionChart(p);
+  }
+  function zoomBy(factor, anchor) {
+    if (!chartState) return;
+    const cur = chartState.y || chartState.autoRange;
+    if (!cur) return;
+    const a = anchor == null ? (cur.min + cur.max) / 2 : anchor;
+    setY(a - (a - cur.min) * factor, a + (cur.max - a) * factor);
+  }
+  function resetZoom(kind) {
+    if (!chartState) return;
+    if (kind === 'all' && chartState.fullRange) {
+      const r = chartState.fullRange, pad = (r.max - r.min) * 0.06 || 1;
+      chartState.y = { min: r.min - pad, max: r.max + pad };
+    } else chartState.y = null;                      // back to the levels-focused default
+    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (p) drawPositionChart(p);
+  }
+  function attachZoom(cv, chart) {
+    if (cv.dataset.zoomed) return;
+    cv.dataset.zoomed = '1';
+    const priceAt = ev => {
+      const r = cv.getBoundingClientRect();
+      const y = chart.scales.y;
+      const py = ev.clientY - r.top;
+      if (py < y.top || py > y.bottom) return null;
+      return y.getValueForPixel(py);
+    };
+    cv.addEventListener('wheel', ev => {
+      if (!chartState) return;
+      ev.preventDefault();
+      zoomBy(ev.deltaY > 0 ? 1.15 : 0.87, priceAt(ev));
+    }, { passive: false });
+
+    let drag = null;
+    const pts = new Map();
+    cv.addEventListener('pointerdown', ev => {
+      pts.set(ev.pointerId, ev);
+      cv.setPointerCapture(ev.pointerId);
+      if (pts.size === 1) drag = { y: ev.clientY, range: { ...(chartState.y || chartState.autoRange) } };
+      if (pts.size === 2) { drag = null; const [a, b] = [...pts.values()];
+        chartState._pinch = { dist: Math.abs(a.clientY - b.clientY) || 1, range: { ...(chartState.y || chartState.autoRange) } }; }
+    });
+    cv.addEventListener('pointermove', ev => {
+      if (!pts.has(ev.pointerId) || !chartState) return;
+      pts.set(ev.pointerId, ev);
+      if (pts.size === 2 && chartState._pinch) {
+        const [a, b] = [...pts.values()];
+        const dist = Math.abs(a.clientY - b.clientY) || 1;
+        const f = chartState._pinch.dist / dist;
+        const r = chartState._pinch.range, mid = (r.min + r.max) / 2, half = (r.max - r.min) / 2 * f;
+        setY(mid - half, mid + half);
+        return;
+      }
+      if (drag && pts.size === 1) {
+        const y = chart.scales.y;
+        const perPx = (drag.range.max - drag.range.min) / Math.max(1, y.bottom - y.top);
+        const shift = (ev.clientY - drag.y) * perPx;     // drag down moves the window up
+        setY(drag.range.min + shift, drag.range.max + shift);
+      }
+    });
+    const end = ev => { pts.delete(ev.pointerId); if (pts.size < 2) chartState && (chartState._pinch = null); if (!pts.size) drag = null; };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('dblclick', () => resetZoom());
+  }
+
+
+  function attachCrosshair(cv, chart, dp) {
+    const move = ev => {
+      const r = cv.getBoundingClientRect();
+      const x = ev.clientX - r.left, y = ev.clientY - r.top;
+      chartState.cross = { x, y };
+      // nearest candle by x, so the readout follows the pointer
+      const idx = chart.scales.x.getValueForPixel(x);
+      const i = Math.max(0, Math.min((chartState.candles || []).length - 1, Math.round(idx)));
+      if (i !== chartState.hover) { chartState.hover = i; paintOhlc(); }
+      chart.options.plugins.crosshair.pos = chartState.cross;
+      chart.update('none');
+    };
+    cv.addEventListener('pointermove', move);
+    cv.addEventListener('pointerleave', () => {
+      chartState.cross = null; chartState.hover = null;
+      chart.options.plugins.crosshair.pos = null; chart.update('none'); paintOhlc();
+    });
+  }
+  // repaint just the readout rather than the whole panel, which would kill the pointer state
+  function paintOhlc() {
+    const el = $('#ohlc'); if (!el || !chartState) return;
+    const rows = chartState.candles || [];
+    const c = chartState.hover != null && rows[chartState.hover] ? rows[chartState.hover] : rows[rows.length - 1];
+    if (!c) { el.innerHTML = ''; return; }
+    const dpv = Math.abs(c.c) < 10 ? 5 : Math.abs(c.c) < 1000 ? 3 : 2;
+    const dir = c.c >= c.o ? 'profit' : 'loss';
+    el.innerHTML = `<span class="t">${esc((c.t || '').replace('T', ' ').slice(0, 16))}</span>`
+      + ['O', 'H', 'L', 'C'].map((k, i) => `<span><i>${k}</i> <b class="${dir}">${[c.o, c.h, c.l, c.c][i].toFixed(dpv)}</b></span>`).join('')
+      + (c.v != null ? `<span><i>V</i> <b>${c.v}</b></span>` : '');
+  }
+
+  function drawSubPanes(rows, labels) {
+    const kill = id => { const el = document.getElementById(id); if (!el) return null;
+      for (let i = charts.length - 1; i >= 0; i--) if (charts[i].canvas === el) { charts[i].destroy(); charts.splice(i, 1); }
+      return el; };
+    const vcv = kill('c-vol');
+    if (vcv && rows.some(c => c.v != null)) {
+      const up = cssVar('--profit'), down = cssVar('--loss');
+      charts.push(new Chart(vcv.getContext('2d'), {
+        type: 'bar',
+        data: { labels, datasets: [{ data: rows.map(c => c.v || 0), backgroundColor: rows.map(c => (c.c >= c.o ? up : down) + '99'), barPercentage: 0.7, categoryPercentage: 0.9 }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+          scales: { x: { display: false }, y: { position: 'right', grid: { color: cssVar('--grid') }, ticks: { color: cssVar('--text-3'), font: { size: 9 }, maxTicksLimit: 3 } } },
+          plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+      }));
+    }
+    const rcv = kill('c-rsi');
+    if (rcv) {
+      const vals = rsi(rows.map(c => c.c), 14);
+      charts.push(new Chart(rcv.getContext('2d'), {
+        type: 'line',
+        data: { labels, datasets: [{ data: vals, borderColor: '#a78bfa', borderWidth: 1.4, pointRadius: 0, tension: 0.25, fill: false, spanGaps: false }] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false,
+          scales: { x: { display: false }, y: { position: 'right', min: 0, max: 100, grid: { color: cssVar('--grid') },
+            ticks: { color: cssVar('--text-3'), font: { size: 9 }, callback: v => ([30, 50, 70].includes(v) ? v : '') , stepSize: 10 } } },
+          plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+      }));
+    }
   }
 
   function drawPositionChart(p) {
@@ -3210,12 +3505,19 @@ if (typeof module !== 'undefined') module.exports = AN;
     const up = cssVar('--profit'), down = cssVar('--loss');
     const colors = rows.map(c => (c.c >= c.o ? up : down));
     const marks = [p.level, p.stopLevel, p.limitLevel, p.cur].filter(v => v != null && isFinite(v));
-    const lo = Math.min(...rows.map(c => c.l), ...marks);
-    const hi = Math.max(...rows.map(c => c.h), ...marks);
-    const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.001 || 1;
-    const yMin = lo - pad, yMax = hi + pad;
+    // Framing the whole 150-candle range squashes entry, stop and target into a sliver. Default
+    // to the band that actually matters — the levels plus recent price — and let zoom widen it.
+    const recent = rows.slice(-40);
+    const autoLo = Math.min(...recent.map(c => c.l), ...marks);
+    const autoHi = Math.max(...recent.map(c => c.h), ...marks);
+    const autoPad = (autoHi - autoLo) * 0.12 || Math.abs(autoHi) * 0.001 || 1;
+    const yMin = chartState.y ? chartState.y.min : autoLo - autoPad;
+    const yMax = chartState.y ? chartState.y.max : autoHi + autoPad;
+    chartState.fullRange = { min: Math.min(...rows.map(c => c.l), ...marks), max: Math.max(...rows.map(c => c.h), ...marks) };
+    chartState.autoRange = { min: autoLo - autoPad, max: autoHi + autoPad };
     // price precision varies wildly across instruments: 7800 vs 1.16082
-    const dp = (hi - lo) < 1 ? 5 : (hi - lo) < 20 ? 3 : 2;
+    const span = yMax - yMin;
+    const dp = span < 0.05 ? 5 : span < 1 ? 4 : span < 20 ? 3 : 2;
     const ctx = cv.getContext('2d');
     // `charts` is a flat array here; drop any previous instance bound to this canvas first
     for (let i = charts.length - 1; i >= 0; i--) {
@@ -3224,8 +3526,13 @@ if (typeof module !== 'undefined') module.exports = AN;
     const chart = new Chart(ctx, {
       type: 'bar',
       data: { labels, datasets: [
-        { label: 'range', data: rows.map(c => [c.l, c.h]), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 2 },
-        { label: 'body', data: rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)]), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 1 },
+        { label: 'range', data: rows.map(c => [c.l, c.h]), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 3 },
+        { label: 'body', data: rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)]), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 2 },
+        // moving averages ride on the same scale as the candles
+        ...INDICATORS.filter(i => i.overlay !== false && chartState.ind.has(i.k)).map(i => ({
+          type: 'line', label: i.label, data: i.fn(rows), borderColor: i.color(), borderWidth: 1.4,
+          pointRadius: 0, tension: 0.2, fill: false, spanGaps: false, order: 1,
+        })),
       ] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
@@ -3240,6 +3547,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         },
         plugins: {
           legend: { display: false },
+          crosshair: { pos: chartState.cross, dp, color: cssVar('--text-3') },
           tooltip: { callbacks: { label: c => { const r = rows[c.dataIndex];
             return `O ${r.o}  H ${r.h}  L ${r.l}  C ${r.c}`; } } },
           levelLines: { lines: [
@@ -3250,9 +3558,12 @@ if (typeof module !== 'undefined') module.exports = AN;
           ] },
         },
       },
-      plugins: [levelLines],
+      plugins: [levelLines, crosshair],
     });
     charts.push(chart);
+    attachZoom(cv, chart);
+    attachCrosshair(cv, chart, dp);
+    drawSubPanes(rows, labels);
   }
 
   function renderOpen() {
