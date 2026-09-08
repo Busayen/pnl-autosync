@@ -45,6 +45,11 @@ function serve(dir) {
         px = c;
       }
       return json(200, { candles: out, allowance: { remaining: 9400, total: 10000 }, cached: false }); }
+    if (p === '/order' && req.method === 'POST') {
+      let body = ''; req.on('data', c => body += c);
+      return req.on('end', () => { calls.push({ p, body, auth: req.headers.authorization || null });
+        return state.orderStatus && state.orderStatus !== 200 ? json(state.orderStatus, state.orderBody || { error: 'order failed' })
+          : json(200, state.orderBody || { dealStatus: 'ACCEPTED', dealId: 'NEW1', level: 5100 }); }); }
     if (p === '/close' && req.method === 'POST') {
       let body = ''; req.on('data', c => body += c);
       return req.on('end', () => { calls.push({ p, body, auth: req.headers.authorization || null });
@@ -284,19 +289,23 @@ async function candleChart(browser, viewport, touch) {
   const { page, errs } = await openPage(browser, viewport, touch);
   await page.evaluate(() => document.querySelector('.symlink')?.click());
   await page.waitForTimeout(2200);
-  const win = () => page.evaluate(() => { const c = window.Chart && Chart.getChart(document.querySelector('#c-pos'));
-    if (!c) return null;
-    const slot = (c.scales.x.right - c.scales.x.left) / Math.max(1, c.scales.x.max - c.scales.x.min + 1);
-    const real = c.data.datasets[0].data.filter(v => v != null).length;
-    return { bars: c.scales.x.max - c.scales.x.min + 1, min: c.scales.x.min, max: c.scales.x.max,
-             total: real, future: c.data.labels.length - real,
-             ySpan: +(c.scales.y.max - c.scales.y.min).toFixed(2), bodyPx: +(slot * 0.62 * 0.9).toFixed(2) }; });
+  const win = () => page.evaluate(() => {
+    const c = window.Chart && Chart.getChart(document.querySelector('#c-pos'));
+    const st = window.__chart && window.__chart();
+    if (!c || !st || !st.x) return null;
+    const sx = c.scales.x;
+    const slot = Math.abs(sx.getPixelForValue(1) - sx.getPixelForValue(0));
+    return { bars: +(sx.max - sx.min + 1).toFixed(3), min: sx.min, max: sx.max,
+             total: st.rows.length, future: +(sx.max - (st.rows.length - 1)).toFixed(3),
+             ySpan: +(c.scales.y.max - c.scales.y.min).toFixed(2),
+             bodyPx: +Math.max(1, Math.min(slot - 1, slot * 0.78, 26)).toFixed(2) };
+  });
 
   const a = await win();
   check(`${label}: the chart opens`, !!a, JSON.stringify(a));
   if (!a) { await page.context().close(); return; }
   // a candle has to be wide enough to read on whatever screen this is
-  check(`${label}: candle bodies are legible`, a.bodyPx >= 3, `${a.bodyPx}px body`);
+  check(`${label}: candle bodies are legible`, a.bodyPx >= 6, `${a.bodyPx}px body`);
   check(`${label}: the window is a subset of the data`, a.bars < a.total, `${a.bars} of ${a.total}`);
   check(`${label}: there is room to scroll past the last candle`, a.future > 0, `${a.future} empty slots`);
 
@@ -311,7 +320,7 @@ async function candleChart(browser, viewport, touch) {
     await page.mouse.move(box.x + area.right + 18, box.y + (area.top + area.bottom) / 2);
     await page.mouse.wheel(0, -240); await page.waitForTimeout(350);
     const sy = await win();
-    check('desktop: the wheel over the price scale zooms price, not time', sy.bars === z.bars && sy.ySpan < z.ySpan, JSON.stringify(sy));
+    check('desktop: the wheel over the price scale zooms price, not time', Math.abs(sy.bars - z.bars) < 0.01 && sy.ySpan < z.ySpan, JSON.stringify(sy));
     check('desktop: the price scale shows a resize cursor', (await page.evaluate(() => document.querySelector('#c-pos').style.cursor)) === 'ns-resize');
     // a gentle notch should not throw the window across the chart
     const before = await win();
@@ -325,12 +334,13 @@ async function candleChart(browser, viewport, touch) {
     await page.mouse.up(); await page.waitForTimeout(350);
     check('desktop: the chart scrolls past the last candle', (await win()).max > (await win()).total - 1,
       `max ${(await win()).max}, last candle ${(await win()).total - 1}`);
+    const prePan = await win();
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
     await page.mouse.down(); await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5, { steps: 10 }); await page.mouse.up();
-    await page.waitForTimeout(350);
-    check('desktop: dragging pans time', (await win()).min < sy.min, `${sy.min} -> ${(await win()).min}`);
+    await page.waitForTimeout(500);
+    check('desktop: dragging pans time', (await win()).min < prePan.min, `${prePan.min} -> ${(await win()).min}`);
     await page.evaluate(() => document.querySelector('[data-zoom="fit"]').click()); await page.waitForTimeout(350);
-    check('desktop: Fit restores the default window', (await win()).bars === a.bars, JSON.stringify(await win()));
+    check('desktop: Fit restores the default window', Math.abs((await win()).bars - a.bars) < 0.01, JSON.stringify(await win()));
     await page.evaluate(() => document.querySelector('[data-zoom="all"]').click()); await page.waitForTimeout(350);
     const all = await win();
     check('desktop: All shows every candle', all.bars >= all.total, `${all.bars} of ${all.total}`);
@@ -399,10 +409,10 @@ async function liveCandleAndTv(browser) {
   await page.evaluate(() => document.querySelector('.symlink')?.click());
   await page.waitForTimeout(2400);
   const bar = () => page.evaluate(() => {
-    const c = window.Chart && Chart.getChart(document.querySelector('#c-pos'));
-    if (!c) return null;
-    const body = c.data.datasets[1].data.filter(v => v != null);
-    return { bars: body.length, last: body[body.length - 1],
+    const st = window.__chart && window.__chart();
+    if (!st || !st.rows.length) return null;
+    const r = st.rows[st.rows.length - 1];
+    return { bars: st.rows.length, last: [Math.min(r.o, r.c), Math.max(r.o, r.c)],
              readout: ((document.querySelector('#ohlc') || {}).innerText || '').replace(/\n/g, ' ') };
   });
 
@@ -442,6 +452,19 @@ async function liveCandleAndTv(browser) {
   await page.waitForTimeout(1600);
   check('the frame follows the chart timeframe',
     /interval=60/.test(await page.evaluate(() => document.querySelector('#tvpanel iframe')?.getAttribute('src')) || ''));
+  // The drawing toolbar is TradingView's own, toggled through the frame URL. On a desktop-width
+  // viewport it starts on; the toggle must flip the flag and be remembered.
+  const tvSrc = () => page.evaluate(() => document.querySelector('#tvpanel iframe')?.getAttribute('src') || '');
+  check('the drawing toolbar is on at desktop width', /hide_side_toolbar=0/.test(await tvSrc()), await tvSrc());
+  await page.evaluate(() => document.querySelector('[data-tvdraw]')?.click());
+  await page.waitForTimeout(700);
+  check('the Draw toggle hides the drawing toolbar', /hide_side_toolbar=1/.test(await tvSrc()), await tvSrc());
+  check('the choice is persisted',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).settings.tv.draw)) === false);
+  await page.evaluate(() => document.querySelector('[data-tvdraw]')?.click());
+  await page.waitForTimeout(700);
+  check('and it toggles back on', /hide_side_toolbar=0/.test(await tvSrc()), await tvSrc());
+
   await page.evaluate(() => document.querySelector('[data-chartclose]')?.click());
   await page.waitForTimeout(600);
   check('closing the chart clears the frame',
@@ -612,6 +635,307 @@ async function trailingStops(browser) {
   await page.context().close();
 }
 
+// Opening a position is the only thing here that can create exposure, so it gets its own token and
+// the same never-claim-success-early handling as a close — plus one difference that matters: an
+// unconfirmed OPEN must not be retryable, because a second attempt doubles the position.
+async function placingOrders(browser) {
+  const orders = () => calls.filter(c => c.p === '/order');
+  const fill = async page => {
+    await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
+    await page.waitForTimeout(400);
+    await page.fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+    await page.fill('#or-size', '2');
+    await page.waitForTimeout(250);
+  };
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid: 5100, offer: 5101, stopLevel: 4900,
+    contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.orderToken = 'ORDTOK'; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+
+  check('there is a way to place an order', await page.evaluate(() => !!document.querySelector('[data-neworder]')));
+  await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
+  await page.waitForTimeout(400);
+  check('it cannot be sent before it is filled in', await page.evaluate(() => document.querySelector('[data-send]')?.disabled) === true);
+  check('epics the account has traded are offered',
+    (await page.evaluate(() => Array.from(document.querySelectorAll('#or-epics option')).map(o => o.value))).includes('IX.D.SPTRD.IFE.IP'));
+  await page.fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+  await page.fill('#or-size', '2');
+  await page.waitForTimeout(300);
+  check('the summary reads the order back', /Buy 2 of US 500 at the market price/.test(
+    await page.evaluate(() => document.querySelector('#or-summary')?.innerText || '')));
+  await page.evaluate(() => document.querySelector('#or-type [data-type="LIMIT"]')?.click());
+  await page.waitForTimeout(250);
+  check('a limit order will not send without a level', await page.evaluate(() => document.querySelector('[data-send]')?.disabled) === true);
+  await page.fill('#or-level', '5050'); await page.waitForTimeout(250);
+  check('with a level, the summary says it is conditional', /only if it trades at/.test(
+    await page.evaluate(() => document.querySelector('#or-summary')?.innerText || '')));
+  await page.evaluate(() => document.querySelector('#or-type [data-type="MARKET"]')?.click());
+  await page.waitForTimeout(250);
+
+  calls = [];
+  await page.evaluate(() => { const b = document.querySelector('[data-send]'); b.click(); b.click(); b.click(); });
+  await page.waitForTimeout(1800);
+  check('three clicks place exactly one order', orders().length === 1, `${orders().length} sends`);
+  const body = orders()[0] ? JSON.parse(orders()[0].body) : {};
+  check('the order says what it is', body.epic === 'IX.D.SPTRD.IFE.IP' && body.direction === 'BUY' && body.size === 2 && body.orderType === 'MARKET', JSON.stringify(body));
+  check('it carries an idempotency key', !!body.idempotencyKey);
+  check('it uses the order token, not the close token', orders()[0] && orders()[0].auth === 'Bearer ORDTOK', orders()[0] && orders()[0].auth);
+  check('success is only claimed on IG confirming', /IG confirmed/.test(
+    await page.evaluate(() => document.querySelector('#toast')?.textContent || '')));
+
+  // a rejection changed nothing, so retrying is fine
+  state = { ...state, orderBody: { dealStatus: 'REJECTED', reason: 'INSUFFICIENT_FUNDS' } };
+  await page.waitForTimeout(500);
+  await fill(page); calls = [];
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(1400);
+  check('a rejected order is reported and can be retried', await page.evaluate(() =>
+    /rejected/i.test(document.querySelector('#or-err')?.textContent || '') && !document.querySelector('[data-send]')?.disabled));
+
+  // an unconfirmed OPEN must not be retryable — this is the one that differs from a close
+  state = { ...state, orderBody: { dealStatus: 'UNCONFIRMED', reason: 'no confirmation' } };
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(1400);
+  check('an unconfirmed order blocks a retry', await page.evaluate(() => !!document.querySelector('[data-send]')?.disabled));
+  await page.evaluate(() => document.querySelector('[data-x]')?.click());
+  await page.waitForTimeout(300);
+
+  // and nothing is sent without the token
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.orderToken = ''; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+  await fill(page); calls = [];
+  check('without a saved token it asks for one', await page.evaluate(() => !!document.querySelector('#or-tok')));
+  await page.evaluate(() => document.querySelector('[data-send]')?.click());
+  await page.waitForTimeout(800);
+  check('and sends nothing until it has one', orders().length === 0, `${orders().length} sends`);
+  check('no page errors through the order paths', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Drawing tools live entirely in this app: anchored to time and price, saved per market, and
+// painted over the candles. The trade planner is the one that costs money if it lies, so its
+// geometry and its colours are both pinned down here.
+async function drawingTools(browser) {
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid: 5062, offer: 5063, stopLevel: 4980,
+    limitLevel: 5090, contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser, { width: 1400, height: 900 });
+  page.on('dialog', d => d.accept());
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2200);
+  const st = () => page.evaluate(() => window.__chart && window.__chart());
+  const box = async () => (await page.$('#c-pos')).boundingBox();
+  const pick = t => page.evaluate(k => document.querySelector(`[data-tool="${k}"]`)?.click(), t);
+  const saved = () => page.evaluate(() =>
+    ((JSON.parse(localStorage.getItem('ledger:v4')).settings.draws || {})['IX.D.SPTRD.IFE.IP'] || []).length);
+
+  check('the drawing toolbar is there',
+    (await page.evaluate(() => document.querySelectorAll('[data-tool]').length)) === 8);
+  const first = await st();
+  check('it starts on the cursor', first.tool === 'cursor', first.tool);
+  check('with nothing drawn', first.draws.length === 0);
+
+  await pick('hline'); await page.waitForTimeout(250);
+  check('picking a tool arms it', (await st()).tool === 'hline');
+  await pick('hline'); await page.waitForTimeout(250);
+  check('picking it again goes back to the cursor', (await st()).tool === 'cursor');
+
+  await pick('hline'); await page.waitForTimeout(250);
+  let b = await box();
+  await page.mouse.move(b.x + b.width * 0.4, b.y + b.height * 0.45);
+  await page.mouse.down(); await page.mouse.up();
+  await page.waitForTimeout(300);
+  const one = await st();
+  check('a click with a tool up leaves a drawing', one.draws.length === 1 && one.draws[0].type === 'hline',
+    JSON.stringify(one.draws.map(d => d.type)));
+  check('and the tool hands back to the cursor', one.tool === 'cursor', one.tool);
+  check('the drawing is saved against the market', (await saved()) === 1);
+
+  // The planner: a long targets above the entry and stops below it, and a short is the mirror.
+  await pick('long'); await page.waitForTimeout(250);
+  b = await box();
+  await page.mouse.move(b.x + b.width * 0.3, b.y + b.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width * 0.55, b.y + b.height * 0.5, { steps: 6 });
+  await page.mouse.up(); await page.waitForTimeout(300);
+  const lg = (await st()).draws.find(d => d.type === 'pos' && d.side === 'long');
+  check('the long tool plans a trade', !!lg, JSON.stringify((await st()).draws.map(d => d.type)));
+  check('a long targets above entry and stops below',
+    !!lg && lg.target > lg.a.p && lg.stop < lg.a.p, lg && `${lg.stop} < ${lg.a.p} < ${lg.target}`);
+
+  await pick('short'); await page.waitForTimeout(250);
+  b = await box();
+  await page.mouse.move(b.x + b.width * 0.6, b.y + b.height * 0.35);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width * 0.8, b.y + b.height * 0.35, { steps: 6 });
+  await page.mouse.up(); await page.waitForTimeout(300);
+  const sh = (await st()).draws.find(d => d.type === 'pos' && d.side === 'short');
+  check('the short tool mirrors it',
+    !!sh && sh.target < sh.a.p && sh.stop > sh.a.p, sh && `${sh.target} < ${sh.a.p} < ${sh.stop}`);
+
+  const pal = await page.evaluate(() => {
+    const o = Chart.getChart(document.querySelector('#c-pos')).options.plugins.drawPaint;
+    const cs = getComputedStyle(document.documentElement);
+    return { up: o.upRgb, down: o.downRgb,
+             pUp: cs.getPropertyValue('--profit-rgb').trim(), pDown: cs.getPropertyValue('--loss-rgb').trim() };
+  });
+  check('the planner paints with the profit and loss colours from Settings',
+    pal.up === pal.pUp && pal.down === pal.pDown && !!pal.up, JSON.stringify(pal));
+
+  // Anchored to a timestamp, so changing the resolution must not move or lose them.
+  const kept = (await st()).draws.length;
+  await page.evaluate(() => document.querySelector('[data-res="HOUR"]')?.click());
+  await page.waitForTimeout(2000);
+  check('drawings survive a timeframe change', (await st()).draws.length === kept,
+    `${kept} -> ${(await st()).draws.length}`);
+  await page.evaluate(() => document.querySelector('[data-res="MINUTE_5"]')?.click());
+  await page.waitForTimeout(2000);
+
+  const hl = (await st()).draws.find(d => d.type === 'hline');
+  const py = await page.evaluate(v => Chart.getChart(document.querySelector('#c-pos')).scales.y.getPixelForValue(v), hl.a.p);
+  b = await box();
+  await page.mouse.click(b.x + b.width * 0.92, b.y + py);
+  await page.waitForTimeout(250);
+  check('clicking a drawing selects it', (await st()).sel === hl.id, String((await st()).sel));
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(300);
+  check('Delete removes the selected drawing', !(await st()).draws.some(d => d.id === hl.id));
+
+  await page.evaluate(() => document.querySelector('[data-drawclear]')?.click());
+  await page.waitForTimeout(350);
+  check('Clear empties the market', (await st()).draws.length === 0 && (await saved()) === 0);
+
+  // The old build could only ever scroll 40 slots past the last candle, whatever the zoom.
+  await page.evaluate(() => document.querySelector('[data-zoom="fit"]')?.click());
+  await page.waitForTimeout(300);
+  b = await box();
+  // Three drags that stay on the canvas: one long one runs the pointer off the left edge, where
+  // no further move is delivered and the pan quietly stops short.
+  for (let k = 0; k < 3; k++) {
+    await page.mouse.move(b.x + b.width * 0.85, b.y + b.height * 0.5);
+    await page.mouse.down();
+    for (let i = 1; i <= 12; i++) await page.mouse.move(b.x + b.width * 0.85 - i * (b.width * 0.055), b.y + b.height * 0.5);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(400);
+  const far = await st();
+  const future = far.x.max - (far.rows.length - 1);
+  check('the future is no longer capped at a fixed number of slots', future > 60,
+    `${future.toFixed(1)} slots past the last candle`);
+  check('but the price itself is never scrolled off', far.x.min <= far.rows.length - 1,
+    `min ${far.x.min.toFixed(1)}, last candle ${far.rows.length - 1}`);
+
+  // A window that is not a whole number of bars is the whole point of the linear axis.
+  check('the window is a fractional number of candles wide, not a whole one',
+    (far.x.max - far.x.min) % 1 !== 0, String(far.x.max - far.x.min));
+
+  check('no page errors driving the drawing tools', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Breakeven is the entry price, filled in for you. It is only reachable from in front: from
+// behind it sits through the price and would fire the moment it armed, so it must be refused.
+async function breakevenStop(browser) {
+  const pos = (bid, offer) => ({ orders: [], positions: [{ dealId: 'D1', epic: 'E', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid, offer, stopLevel: 4900, contractSize: 1, currency: 'USD' }] });
+  state = pos(5062, 5063);
+  const { page, errs } = await openPage(browser);
+  const open = async p => { await p.evaluate(() => document.querySelector('[data-softstop]')?.click()); await p.waitForTimeout(450); };
+  const txt = (p, sel) => p.evaluate(s => (document.querySelector(s) || {}).innerText || '', sel);
+  await open(page);
+  check('the stop dialog offers Breakeven at the entry price', /5000/.test(await txt(page, '#ss-be')), await txt(page, '#ss-be'));
+  await page.evaluate(() => document.querySelector('#ss-be').click());
+  await page.waitForTimeout(250);
+  check('Breakeven fills the entry price in',
+    (await page.evaluate(() => document.querySelector('#ss-price').value)) === '5000');
+  check('and it reads back how far away that is', /62/.test(await txt(page, '#ss-dist')), await txt(page, '#ss-dist'));
+  await page.evaluate(() => document.querySelector('[data-arm]').click());
+  await page.waitForTimeout(450);
+  const st = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).settings.softStops || {});
+  check('arming it stores a stop at the entry price', !!st.D1 && st.D1.price === 5000, JSON.stringify(st.D1 || null));
+  check('no page errors arming a breakeven stop', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+
+  // the same button, with the position under water
+  state = pos(4950, 4951);
+  const { page: p2 } = await openPage(browser);
+  await open(p2);
+  await p2.evaluate(() => document.querySelector('#ss-be').click());
+  await p2.waitForTimeout(250);
+  check('below entry it warns Breakeven would fire immediately',
+    /wrong side/i.test(await txt(p2, '#ss-dist')), await txt(p2, '#ss-dist'));
+  await p2.evaluate(() => document.querySelector('[data-arm]').click());
+  await p2.waitForTimeout(350);
+  check('and arming it is refused', /through the price/i.test(await txt(p2, '#ss-err')), await txt(p2, '#ss-err'));
+  check('nothing was armed', !(await p2.evaluate(() =>
+    (JSON.parse(localStorage.getItem('ledger:v4')).settings.softStops || {}).D1)));
+  await p2.context().close();
+}
+
+// The order ticket borrows the app's chart and points it at the order being composed, then hands
+// it back. Both halves matter: a ticket with no chart is the old form, and a chart that never
+// comes back loses the position the page was looking at.
+async function ticketChart(browser) {
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid: 5062, offer: 5063, stopLevel: 4980,
+    limitLevel: 5090, contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser, { width: 1400, height: 900 });
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2200);
+  const drawn = sel => page.evaluate(s => { const cv = document.querySelector(s + ' canvas');
+    return !!(cv && window.Chart && Chart.getChart(cv)); }, sel);
+  check('the page is charting the position first', await drawn('#chartpanel'));
+
+  await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
+  await page.waitForTimeout(500);
+  check('the ticket opens beside a chart slot',
+    /Pick an instrument/.test(await page.evaluate(() => (document.querySelector('#or-chart') || {}).innerText || '')));
+  const fill = async (sel, v) => { await page.fill(sel, v);
+    await page.evaluate(s => document.querySelector(s).dispatchEvent(new Event('input', { bubbles: true })), sel); };
+  await fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+  await page.waitForTimeout(2600);
+  check('naming an instrument loads its chart into the ticket', await drawn('#or-chart'));
+  check('and the page chart is not left behind the modal', !(await drawn('#chartpanel')));
+
+  await fill('#or-size', '1'); await fill('#or-stop', '25'); await fill('#or-limit', '75');
+  await page.waitForTimeout(800);
+  const lines = await page.evaluate(() => Chart.getChart(document.querySelector('#or-chart canvas'))
+    .options.plugins.levelLines.lines.filter(l => l.value != null).map(l => `${l.label}:${l.value}`));
+  check('the stop and target are drawn on the ticket chart',
+    lines.some(l => l.startsWith('stop:')) && lines.some(l => l.startsWith('target:')), JSON.stringify(lines));
+  const yr = await page.evaluate(() => { const c = Chart.getChart(document.querySelector('#or-chart canvas'));
+    return { min: c.scales.y.min, max: c.scales.y.max }; });
+  const stopV = Number((lines.find(l => l.startsWith('stop:')) || ':').split(':')[1]);
+  check('and the price window frames them', stopV >= yr.min && stopV <= yr.max, `${stopV} in ${yr.min}..${yr.max}`);
+  check('the ticket reads back the reward-to-risk',
+    /3\.00 reward-to-risk/.test(await page.evaluate(() => (document.querySelector('#or-chart') || {}).innerText || '')));
+
+  // selling flips which side the stop sits
+  await page.evaluate(() => document.querySelector('#or-dir [data-dir="SELL"]').click());
+  await page.waitForTimeout(700);
+  const sell = await page.evaluate(() => Chart.getChart(document.querySelector('#or-chart canvas'))
+    .options.plugins.levelLines.lines.filter(l => l.value != null && (l.label === 'stop' || l.label === 'target'))
+    .map(l => `${l.label}:${l.value}`));
+  const g = k => Number((sell.find(l => l.startsWith(k)) || ':').split(':')[1]);
+  check('switching to sell puts the stop above and the target below', g('stop') > g('target'), JSON.stringify(sell));
+
+  await page.evaluate(() => document.querySelector('.modal.ticket [data-x]').click());
+  await page.waitForTimeout(700);
+  check('closing the ticket hands the chart back to the page', await drawn('#chartpanel'));
+  check('and the ticket is gone', !(await page.evaluate(() => !!document.querySelector('.modal.ticket'))));
+  check('no page errors through the ticket', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -624,8 +948,10 @@ async function trailingStops(browser) {
       ['foreign currency', foreignCurrency], ['IG reference rates', igReferenceRates],
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
       ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
-      ['live bar + TradingView', liveCandleAndTv],
-      ['app-side stops', appSideStops], ['trailing stops', trailingStops]]) {
+      ['live bar + TradingView', liveCandleAndTv], ['drawing tools', drawingTools],
+      ['app-side stops', appSideStops], ['trailing stops', trailingStops],
+      ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
+      ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }

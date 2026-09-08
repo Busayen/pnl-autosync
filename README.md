@@ -1,5 +1,7 @@
 # Ledger — a self-contained PnL trading dashboard
 
+README is not updated to the latest version 
+
 A single HTML file that turns broker exports into a proper trading review: equity curve,
 heatmap calendar, R-multiples, session analysis, risk-rule adherence and confidence intervals.
 
@@ -16,6 +18,7 @@ Live: <https://busayen.github.io/pnl-autosync/>
 - [Getting your data in](#getting-your-data-in)
 - [The five sections](#the-five-sections)
 - [Concepts worth understanding](#concepts-worth-understanding)
+- [Placing orders](#placing-orders)
 - [App-side stops](#app-side-stops)
 - [Settings reference](#settings-reference)
 - [Optional: automatic sync with IG](#optional-automatic-sync-with-ig)
@@ -162,6 +165,39 @@ Instead the app reports how much of each session's capital was consumed at its w
 
 ---
 
+## Placing orders
+
+**New order** on the Open section opens a position on IG: **Market** fills now, **Limit** rests
+until the price trades at your level. Both take an optional stop and target distance.
+
+The ticket carries the chart for the instrument on its left, with your entry, stop and target drawn
+on the price as you type them, so you can see the trade before you send it. `TV` adds a TradingView
+chart under it. Naming an instrument is what loads the chart — each new timeframe costs 150 of IG's
+weekly data points, so it does not fetch on every keystroke.
+
+**This needs a worker endpoint that does not ship with the dashboard.** `worker/order-endpoint.js`
+is a reference `POST /order` handler to add to your `ig-sync` worker next to `/close`. Until it is
+deployed the button is there and every order fails. Read that file before deploying it — the IG
+field names are written from the documentation, not from a successful fill, so try it on a demo
+account first.
+
+It uses **its own secret**, `ORDER_TOKEN`, separate from `CLOSE_TOKEN`. A leaked close token can
+only shut positions; one that could also open them is a far larger blast radius, and nothing is
+gained by making one key do both. Set both on the worker, and set `MAX_ORDER_SIZE` there too if you
+want a ceiling a fat finger cannot get past.
+
+How failures are handled, which is the part worth knowing:
+
+- The order is only called placed when **IG confirms** it, never on the request returning 200.
+- A **rejection** (insufficient funds, market closed) changed nothing, so it is shown and you can
+  try again.
+- An order IG **did not confirm** blocks the retry button, because a second attempt would double
+  the position. Check the IG app before doing anything else.
+- The idempotency key is minted per dialog, and the reference worker refuses a repeat of the same
+  key for an hour.
+
+---
+
 ## App-side stops
 
 IG refuses a stop closer than its own minimum distance from the price. **Stop** on an open position
@@ -175,9 +211,15 @@ well past your level. It sends a market order, so it slips like any other.
 
 It is a convenience on top of a broker stop, **never a replacement for one**.
 
-### Fixed or trailing
+### Fixed, breakeven, or trailing
 
-A **fixed** stop sits at the price you name. A **trailing** one sits a distance behind the best
+A **fixed** stop sits at the price you name. **Breakeven** fills in your entry price for you — one
+click rather than reading it off the row and retyping it. Note it is breakeven on the *level*, not
+on the money: you still pay the spread, so a position closed there is a touch down, not exactly
+flat. It is only reachable while the position is in front. From behind, your entry sits through the
+price, so it would fire the instant it armed — the dialog says so and refuses to arm it.
+
+A **trailing** stop sits a distance behind the best
 price the tab has seen and ratchets one way only — up for a long, down for a short — never giving
 ground.
 
@@ -196,6 +238,56 @@ Practicalities:
 - If IG **rejects** the close it is reported and not retried. If IG **does not confirm**, it stops
   and tells you to check the IG app — the order may have filled.
 - Closing the position any other way removes the stop.
+
+---
+
+## The chart
+
+Click a symbol in the open positions table to chart it. Candles come from IG once per timeframe per
+session and are cached; the bar in progress is built from the position feed, which is already
+running and costs nothing.
+
+The time axis is a fractional index rather than a category, so it pans on parts of a candle rather
+than jumping one at a time, and it scrolls forward until only a couple of candles are left on
+screen — most of a pane's worth of empty space to plan into, and more the further you zoom out.
+
+| Gesture | Effect |
+|---|---|
+| Scroll over the chart | Zoom time around the pointer |
+| Scroll over the price scale (or hold Shift) | Zoom price |
+| Drag the chart | Pan both axes; a flick coasts |
+| Drag the price or time scale | Stretch that axis |
+| Double-click | Back to the default window |
+| Pinch | Zoom both axes |
+
+`Fit` restores that default, `All` shows every candle, and `Levels` reframes the price around your
+entry, stop and target.
+
+### Drawing tools
+
+The rail down the left of the chart holds a horizontal line, a trend line, a ray, a box, a
+Fibonacci retracement, and a **trade planner** — the long/short tool that shades the profit zone in
+your profit colour and the risk zone in your loss colour, straight from whichever palette is set in
+Settings, and prints the reward-to-risk.
+
+Pick a tool, drag on the chart. Pick it again to go back to the cursor. With the cursor, click a
+drawing to select and move it, drag its handles to reshape it, and press Delete to remove it. The
+bin at the foot of the rail clears the market.
+
+Drawings are anchored to **time and price**, not to a candle index, so they stay put as new candles
+arrive and when you change timeframe. They are saved per instrument, in your browser, alongside
+everything else.
+
+They are notes to yourself. Nothing on the chart places, moves, or closes anything — an app-side
+stop is the only drawing-adjacent thing that acts, and you arm that from the **Stop** button.
+
+### TradingView alongside
+
+`TV` puts a TradingView chart under the built-in one, on a second feed, so the prices will not
+match IG exactly. It is the only thing in the app that loads someone else's code, it is off by
+default, and it runs in a cross-origin frame that cannot reach the tokens this page holds.
+`Draw` inside that panel turns on TradingView's own drawing toolbar; those drawings live inside
+their frame, not in this app, and are not saved unless you are signed in to TradingView.
 
 ---
 

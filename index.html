@@ -23,7 +23,7 @@
   --loss: #e11d48;
   --loss-rgb: 225 29 72; --loss-soft: rgb(var(--loss-rgb) / 0.14); --loss-glow: rgb(var(--loss-rgb) / 0.35);
   --compare: #8b5cf6; --compare-rgb: 139 92 246;
-  --accent: #f5f5f5; --accent-text: #0a0a0a;
+  --accent: #f5f5f5; --accent-text: #0a0a0a; --accent-rgb: 245 245 245;
   --shadow: 0 1px 2px rgba(0,0,0,.6), 0 12px 40px rgba(0,0,0,.45);
   --ring: rgba(255,255,255,0.25);
   --grid: rgba(255,255,255,0.06);
@@ -36,7 +36,7 @@
   --border: rgba(0,0,0,0.08); --border-strong: rgba(0,0,0,0.16);
   --text: #0a0a0a; --text-2: #52525b; --text-3: #8a8a93;
   --profit-soft: rgb(var(--profit-rgb) / 0.12); --loss-soft: rgb(var(--loss-rgb) / 0.10);
-  --accent: #0a0a0a; --accent-text: #ffffff;
+  --accent: #0a0a0a; --accent-text: #ffffff; --accent-rgb: 10 10 10;
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px rgba(0,0,0,.10);
   --ring: rgba(0,0,0,0.2);
   --edge: rgba(0,0,0,0.16);
@@ -242,6 +242,20 @@ td .del:hover { color: var(--loss); background: var(--loss-soft); }
 .overlay.open { display: flex; animation: fade .18s ease; }
 .modal { width: 100%; max-width: 480px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); animation: pop .22s cubic-bezier(.2,.8,.2,1); }
 .modal.wide { max-width: 560px; }
+.modal.ticket { max-width: min(1180px, calc(100vw - 32px)); }
+.ticket-row { flex: 1 1 auto; display: flex; gap: 0; align-items: stretch; min-height: 0; }
+.ticket-chart { flex: 1 1 58%; min-width: 0; border-right: 1px solid var(--border); overflow: auto; padding-bottom: 8px; }
+.ticket-chart .card.chart { border: 0; background: transparent; box-shadow: none; margin: 0; }
+.ticket-chart .cw.tall { height: 340px; }
+.ticket-form { flex: 1 1 42%; min-width: 320px; overflow: auto; }
+.ticket-empty { padding: 40px 20px; text-align: center; color: var(--text-3); font-size: 12px; }
+@media (max-width: 900px) {
+  .modal.ticket { max-width: 560px; }
+  .ticket-row { flex-direction: column; }
+  .ticket-chart { flex: none; border-right: 0; border-bottom: 1px solid var(--border); }
+  .ticket-chart .cw.tall { height: 240px; }
+  .ticket-form { min-width: 0; }
+}
 .modal-head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 14px; }
 .modal-head h3 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .modal-head p { margin: 3px 0 0; color: var(--text-3); font-size: 12px; }
@@ -1009,6 +1023,16 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 #chartpanel canvas:active { cursor: grabbing; }
 
 .indctl { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+.chartrow { display: flex; align-items: stretch; gap: 0; }
+.chartcol { flex: 1 1 auto; min-width: 0; }
+.drawbar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; padding: 8px 5px; border-right: 1px solid var(--border); }
+.drawbar button { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-3); cursor: pointer; transition: background .12s, color .12s; }
+.drawbar button:hover { background: var(--card-hover); color: var(--text); }
+.drawbar button.active { background: var(--card-hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.drawbar .sep { height: 1px; background: var(--border); margin: 5px 3px; }
+.drawbar svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 700px) { .drawbar { padding: 6px 3px; } .drawbar button { width: 26px; height: 26px; } }
 .indctl .tab { height: 24px; padding: 0 8px; font-size: 10.5px; }
 .ohlc { display: flex; gap: 14px; align-items: center; padding: 0 16px 8px; font-size: 11.5px; color: var(--text-3); flex-wrap: wrap; }
 .ohlc .t { color: var(--text-2); font-weight: 600; }
@@ -3242,7 +3266,8 @@ if (typeof module !== 'undefined') module.exports = AN;
               <button class="tab ${existing && existing.trail ? 'active' : ''}" data-mode="trail">Trailing</button>
             </span></div>
           <div class="field" id="ss-fixed-wrap"><label for="ss-price">Close at</label>
-            <input type="number" id="ss-price" step="any" value="${existing && !existing.trail ? existing.price : ''}" placeholder="${p.cur != null ? p.cur : 'price'}" autocomplete="off"></div>
+            <input type="number" id="ss-price" step="any" value="${existing && !existing.trail ? existing.price : ''}" placeholder="${p.cur != null ? p.cur : 'price'}" autocomplete="off">
+            ${p.level != null ? `<button type="button" class="btn ghost sm" id="ss-be" style="margin-top:8px" title="Fill in your entry price, ${p.level}, so the position closes for roughly nothing rather than a loss. The spread means it is not exactly nothing.">Breakeven · ${p.level}</button>` : ''}</div>
           <div class="field hidden" id="ss-trail-wrap"><label for="ss-trailby">Trail by (points)</label>
             <input type="number" id="ss-trailby" step="any" min="0" value="${existing && existing.trail ? existing.trail.distance : ''}" placeholder="e.g. 8" autocomplete="off"></div>
           <div class="help" id="ss-dist"></div>
@@ -3287,6 +3312,15 @@ if (typeof module !== 'undefined') module.exports = AN;
       err.textContent = ''; describe();
       setTimeout(() => (mode === 'trail' ? trailBy : input).focus(), 20);
     }));
+    const be = wrap.querySelector('#ss-be');
+    // Breakeven is the entry price. It is only reachable while the position is in front: from
+    // behind it sits through the price, and describe() says so rather than the click being ignored.
+    if (be) be.addEventListener('click', () => {
+      if (mode !== 'fixed') return;
+      input.value = String(p.level);
+      err.textContent = '';
+      describe(); input.focus();
+    });
     input.addEventListener('input', describe);
     trailBy.addEventListener('input', describe);
     describe();
@@ -3336,15 +3370,18 @@ if (typeof module !== 'undefined') module.exports = AN;
     const epics = knownEpics();
     const wrap = document.createElement('div');
     wrap.className = 'overlay open';
-    wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+    wrap.innerHTML = `<div class="modal ticket" role="dialog" aria-modal="true">
         <div class="modal-head"><div><h3>New order</h3><p>Opens a position on IG. This cannot be undone from here.</p></div>
           <button class="btn ghost icon sm" data-x aria-label="Close">${I.x}</button></div>
+        <div class="ticket-row">
+        <div class="ticket-chart"><div id="or-chart"><div class="ticket-empty">Pick an instrument to see its chart.</div></div><div id="or-tv"></div></div>
+        <div class="ticket-form">
         <div class="modal-body">
           <div class="settings-form">
             <div class="field full"><label for="or-epic">Instrument (IG epic)</label>
               <input type="text" id="or-epic" list="or-epics" placeholder="e.g. IX.D.SPTRD.IFE.IP" spellcheck="false" autocomplete="off">
               <datalist id="or-epics">${epics.map(e => `<option value="${esc(e.epic)}">${esc(e.name)}</option>`).join('')}</datalist>
-              <div class="help">${epics.length ? 'Instruments this account has traded are offered above.' : 'No epics known yet — sync or open a position first, or type one.'}</div></div>
+              <div class="help">${epics.length ? 'Instruments this account has traded are offered above.' : 'No epics known yet — sync or open a position first, or type one.'} Pick one, or press Enter, to load its chart — each new timeframe costs 150 of IG's weekly data points.</div></div>
             <div class="field"><label>Direction</label>
               <span class="tabs" id="or-dir">
                 <button class="tab active" data-dir="BUY">Buy</button><button class="tab" data-dir="SELL">Sell</button></span></div>
@@ -3364,11 +3401,22 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div class="err" id="or-err" style="margin-top:10px"></div>
           <div class="dim" id="or-status" style="font-size:11.5px;margin-top:6px"></div>
         </div>
+        </div>
+        </div>
         <div class="modal-foot"><button class="btn ghost" data-x>Cancel</button>
           <div class="right"><button class="btn primary" data-send disabled>Place order</button></div></div>
       </div>`;
     document.body.appendChild(wrap);
-    const done = () => wrap.remove();
+    // The ticket borrows the one chart the app owns and points it at the order being composed,
+    // then hands it back to whatever the page was showing before.
+    const prevChart = chartState;
+    const done = () => {
+      wrap.remove();
+      chartState = prevChart;
+      if (chartState) { renderChartPanel(); renderTvPanel(); }
+      else { const mp = $('#chartpanel'), mt = $('#tvpanel');
+             if (mp) mp.innerHTML = ''; if (mt) { mt.innerHTML = ''; mt.dataset.url = ''; } }
+    };
     wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
     const q = id => wrap.querySelector('#' + id);
     let dir = 'BUY', type = 'MARKET';
@@ -3376,10 +3424,69 @@ if (typeof module !== 'undefined') module.exports = AN;
     const seg = (id, set) => wrap.querySelectorAll(`#${id} [data-${id === 'or-dir' ? 'dir' : 'type'}]`).forEach(b =>
       b.addEventListener('click', () => {
         wrap.querySelectorAll(`#${id} .tab`).forEach(x => x.classList.toggle('active', x === b));
-        set(b.dataset.dir || b.dataset.type); describe();
+        set(b.dataset.dir || b.dataset.type); describe(); refreshPreview();
       }));
     seg('or-dir', v => { dir = v; });
     seg('or-type', v => { type = v; q('or-level-wrap').classList.toggle('hidden', type !== 'LIMIT'); });
+
+    // The chart is fed a position-shaped picture of the order as you type it, so entry, stop and
+    // target are drawn on the price rather than left as numbers in a form.
+    let shownEpic = null;
+    function buildPreview() {
+      const epic = q('or-epic').value.trim();
+      const known = epics.find(e => e.epic === epic);
+      const held = (S.positions || []).find(x => x.epic === epic);
+      const size = parseFloat(q('or-size').value), level = parseFloat(q('or-level').value);
+      const stopD = parseFloat(q('or-stop').value), limD = parseFloat(q('or-limit').value);
+      const rows = (chartState && chartState.candles) || [];
+      const last = rows.length ? rows[rows.length - 1].c : null;
+      const cur = held && held.cur != null ? held.cur : last;
+      const isLimit = type === 'LIMIT' && isFinite(level) && level > 0;
+      const entry = isLimit ? level : cur;
+      const long = dir === 'BUY';
+      const unit = known ? pointValueFor(known.name, epic) : null;
+      const at = (d, sign) => entry != null && isFinite(d) && d > 0
+        ? Math.round((long === (sign > 0) ? entry + d : entry - d) * 1e6) / 1e6 : null;
+      return { preview: true, dealId: '__order', epic, market: known ? known.name : epic, long,
+        size: isFinite(size) && size > 0 ? size : null,
+        level: isLimit ? level : null, cur: cur != null ? cur : null,
+        stopLevel: at(stopD, -1), limitLevel: at(limD, 1),
+        rr: (isFinite(stopD) && stopD > 0 && isFinite(limD) && limD > 0) ? limD / stopD : null,
+        previewRisk: unit && isFinite(stopD) && stopD > 0 && isFinite(size) && size > 0 ? stopD * unit * size : null };
+    }
+    function refreshPreview() {
+      if (!chartState || !chartState.preview) return;
+      chartState.preview = buildPreview();
+      if (chartState.candles) { redrawChart(); renderChartPanel(); }
+    }
+    // Candles cost IG allowance, so a chart is only fetched for an instrument you actually named:
+    // one from the list, or one you finished typing.
+    async function loadChartFor() {
+      const epic = q('or-epic').value.trim();
+      if (epic === shownEpic) { refreshPreview(); return; }
+      shownEpic = epic;
+      if (!epic) {
+        chartState = null;
+        const h = q('or-chart'), t = q('or-tv');
+        if (h) h.innerHTML = '<div class="ticket-empty">Pick an instrument to see its chart.</div>';
+        if (t) { t.innerHTML = ''; t.dataset.url = ''; }
+        return;
+      }
+      const mp = $('#chartpanel'), mt = $('#tvpanel');
+      if (mp) mp.innerHTML = '';
+      if (mt) { mt.innerHTML = ''; mt.dataset.url = ''; }
+      chartState = { dealId: '__order', host: '#or-chart', tvHost: '#or-tv', preview: null, shown: true,
+        res: (prevChart && prevChart.res) || 'MINUTE_5', candles: null, allowance: null, err: null,
+        loading: true, ind: new Set(['ema20']), hover: null, tool: 'cursor', sel: null, x: null, y: null };
+      chartState.preview = buildPreview();
+      renderChartPanel();
+      await loadCandles();
+      // the field may have moved on while IG was answering
+      if (!chartState || q('or-epic').value.trim() !== epic) return;
+      chartState.preview = buildPreview();
+      chartState.x = null;
+      renderChartPanel();
+    }
 
     // The summary is the safety rail: nothing can be sent until it reads back what will happen.
     function describe() {
@@ -3399,7 +3506,13 @@ if (typeof module !== 'undefined') module.exports = AN;
         + risk + (unit ? '' : ' <span class="dim">No value-per-point known for this instrument, so no risk estimate.</span>');
       send.disabled = false;
     }
-    ['or-epic', 'or-size', 'or-level', 'or-stop', 'or-limit'].forEach(id => q(id).addEventListener('input', describe));
+    ['or-size', 'or-level', 'or-stop', 'or-limit'].forEach(id =>
+      q(id).addEventListener('input', () => { describe(); refreshPreview(); }));
+    q('or-epic').addEventListener('input', () => {
+      describe();
+      if (epics.some(e => e.epic === q('or-epic').value.trim())) loadChartFor();
+    });
+    q('or-epic').addEventListener('change', loadChartFor);
     describe();
     setTimeout(() => q('or-epic').focus(), 30);
 
@@ -3427,7 +3540,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (!orderTokenValue()) sessionOrderToken = tok;
         if (data.dealStatus === 'ACCEPTED') {
           done();
-          toast(`${type === 'MARKET' ? 'Opened' : 'Placed'} ${dir === 'BUY' ? 'buy' : 'sell'} ${size} on ${esc(epic)}. IG confirmed.`, 8000);
+          toast(`${type === 'MARKET' ? 'Opened' : 'Placed'} ${dir === 'BUY' ? 'buy' : 'sell'} ${size} on ${epic}. IG confirmed.`, 8000);
           fetchPositions(); fetchOrders(true); runSync(true);
         } else if (data.dealStatus === 'UNCONFIRMED') {
           // it may well have gone on; retrying could double the position
@@ -3544,7 +3657,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (fx) return `OANDA:${fx[1]}${fx[2]}`;
     return '';
   }
-  const tvCfg = () => (S.settings.tv = S.settings.tv || { on: false, symbols: {} });
+  const tvCfg = () => (S.settings.tv = S.settings.tv || { on: false, symbols: {}, draw: null });
+  // TradingView's drawing toolbar is a column of buttons down the left of the frame. It is worth
+  // the width on a desktop and eats a phone, so the default follows the viewport until you pick.
+  const tvDraw = () => { const d = tvCfg().draw; return d == null ? window.innerWidth >= 820 : !!d; };
   function tvSymbolFor(p) {
     const cfg = tvCfg(), k = p.epic || p.market || '';
     return (cfg.symbols && cfg.symbols[k]) || tvGuess(p.market) || '';
@@ -3553,14 +3669,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     const q = new URLSearchParams({
       symbol: sym, interval: TV_INTERVAL[chartState.res] || '5',
       theme: S.theme === 'light' ? 'light' : 'dark', style: '1', locale: 'en',
-      hide_side_toolbar: '1', allow_symbol_change: '1', save_image: '0', withdateranges: '1',
+      hide_side_toolbar: tvDraw() ? '0' : '1', allow_symbol_change: '1', save_image: '0', withdateranges: '1',
     });
     return `https://s.tradingview.com/widgetembed/?${q}`;
   }
   function renderTvPanel() {
-    const el = $('#tvpanel'); if (!el) return;
+    const el = tvHost(); if (!el) return;
     const cfg = tvCfg();
-    const p = chartState && (S.positions || []).find(x => x.dealId === chartState.dealId);
+    const p = chartPos();
     if (!p || !cfg.on) { el.innerHTML = ''; el.dataset.url = ''; return; }
     const sym = tvSymbolFor(p);
     const url = sym ? tvUrl(sym) : '';
@@ -3574,6 +3690,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div class="tv-head">
             <input type="text" id="tv-sym" value="${esc(sym)}" placeholder="e.g. OANDA:SPX500USD" aria-label="TradingView symbol" spellcheck="false">
             <button class="btn ghost sm" data-tvset>Set</button>
+            <button class="btn ghost sm ${tvDraw() ? 'on' : ''}" data-tvdraw title="Show TradingView's drawing tools down the left of the frame. Drawings live inside TradingView, not in this app.">Draw</button>
             <button class="btn ghost icon sm" data-tvclose aria-label="Hide TradingView">${I.x}</button>
           </div>
         </div>
@@ -3589,6 +3706,9 @@ if (typeof module !== 'undefined') module.exports = AN;
     };
     el.querySelector('[data-tvset]').addEventListener('click', save);
     $('#tv-sym').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    el.querySelector('[data-tvdraw]').addEventListener('click', () => {
+      cfg.draw = !tvDraw(); persist(); el.dataset.url = ''; renderTvPanel();
+    });
     el.querySelector('[data-tvclose]').addEventListener('click', () => { cfg.on = false; persist(); renderTvPanel(); renderChartPanel(); });
   }
 
@@ -3619,6 +3739,14 @@ if (typeof module !== 'undefined') module.exports = AN;
   // they are fetched once per open and never polled. The live price line is driven by the
   // position feed that is already running, which costs nothing extra.
   let chartState = null;
+  // The chart can be pointed at an open position or at an order being composed, and rendered into
+  // the page or into the order ticket. Everything downstream asks these three rather than
+  // assuming either.
+  const chartPos = () => !chartState ? null
+    : (chartState.preview || (S.positions || []).find(x => x.dealId === chartState.dealId));
+  const chartHost = () => $(chartState && chartState.host || '#chartpanel');
+  const hostQ = sel => { const h = chartHost(); return h ? h.querySelector(sel) : null; };
+  const tvHost = () => $(chartState && chartState.tvHost || '#tvpanel');
   // Every resolution IG exposes, labelled the way a charting package would. Anything not in
   // this list is rejected by the worker, so the two must stay in step.
   const RES_CHOICES = [
@@ -3649,7 +3777,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!chartState || !(chartState.candles || []).length) return false;
     const step = RES_MS[chartState.res];
     if (!step) return false;
-    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    const p = chartPos();
     if (!p) return false;
     const bid = Number(p.bid), offer = Number(p.offer);
     const px = isFinite(bid) && isFinite(offer) ? (bid + offer) / 2 : isFinite(bid) ? bid : isFinite(offer) ? offer : NaN;
@@ -3725,14 +3853,17 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!p) return;
     if (!syncBase()) { toast('The chart needs the IG sync worker.'); return; }
     chartState = { dealId, res: (chartState && chartState.res) || 'MINUTE_5', candles: null, allowance: null, err: null, loading: true,
-      ind: (chartState && chartState.ind) || new Set(['ema20']), hover: null };
+      ind: (chartState && chartState.ind) || new Set(['ema20']), hover: null,
+      tool: (chartState && chartState.tool) || 'cursor', sel: null };
     renderChartPanel();
     await loadCandles();
   }
   async function loadCandles() {
     if (!chartState) return;
-    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
-    if (!p || !p.epic) { chartState.err = 'This position has no instrument code, so candles cannot be fetched.'; chartState.loading = false; renderChartPanel(); return; }
+    const p = chartPos();
+    if (!p || !p.epic) { chartState.err = p && p.preview ? 'Pick an instrument to see its chart.'
+      : 'This position has no instrument code, so candles cannot be fetched.';
+      chartState.loading = false; renderChartPanel(); return; }
     const ck = candleKey(p.epic, chartState.res);
     const cached = candleCache.get(ck);
     if (cached) {                      // already bought this resolution this session
@@ -3756,20 +3887,23 @@ if (typeof module !== 'undefined') module.exports = AN;
     renderChartPanel();
   }
   function closeChart() {
+    const el = chartHost(), tv = tvHost();
     chartState = null;
-    const el = $('#chartpanel'); if (el) el.innerHTML = '';
-    const tv = $('#tvpanel'); if (tv) { tv.innerHTML = ''; tv.dataset.url = ''; }
+    if (el) el.innerHTML = '';
+    if (tv) { tv.innerHTML = ''; tv.dataset.url = ''; }
   }
 
   function renderChartPanel() {
-    const el = $('#chartpanel'); if (!el) return;
+    const el = chartHost(); if (!el) return;
     if (!chartState) { el.innerHTML = ''; return; }
-    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    const p = chartPos();
     if (!p) { closeChart(); return; }
     const a = chartState.allowance;
     el.innerHTML = `<div class="card chart wide" id="chartcard">
         <div class="card-head">
-          <div class="card-title">${esc(p.market || p.epic)}<small>${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}${chartState.cached ? ' · from cache' : ''}</small></div>
+          <div class="card-title">${esc(p.market || p.epic)}<small>${p.preview
+            ? `Planning ${p.long ? 'a buy' : 'a sell'}${p.size ? ` of ${p.size}` : ''}`
+            : `${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}`}${chartState.cached ? ' · from cache' : ''}</small></div>
           <div class="tbl-tools">
             <span class="tabs">${RES_CHOICES.filter(([k]) => RES_QUICK.includes(k)).map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
             <span class="select sm"><select id="res-more" aria-label="Timeframe">${RES_CHOICES.map(([k, l]) => `<option value="${k}" ${chartState.res === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>
@@ -3782,15 +3916,19 @@ if (typeof module !== 'undefined') module.exports = AN;
               <button class="btn ghost sm" data-zoom="fit" title="Back to the default view">Fit</button>
               <button class="btn ghost sm ${tvCfg().on ? 'on' : ''}" data-tv title="Show a TradingView chart below. Loads TradingView in a separate frame; off by default.">TV</button>
             </span>
-            <button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            ${p.preview ? '' : '<button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>'}
           </div>
         </div>
-        <div class="stat-row" style="padding:12px 16px 6px">
+        ${p.preview ? `<div class="stat-row" style="padding:12px 16px 6px">
+          <div><span class="k">Entry</span><b class="num">${p.level != null ? p.level : 'market'}</b><span class="k">${p.cur != null ? `last ${p.cur}` : 'no live price for this instrument'}</span></div>
+          <div><span class="k">Stop</span><b class="num ${p.stopLevel != null ? 'loss' : 'dim'}">${p.stopLevel ?? '—'}</b><span class="k">${p.previewRisk != null ? `risking about ${money(p.previewRisk)}` : ''}</span></div>
+          <div><span class="k">Target</span><b class="num ${p.limitLevel != null ? 'profit' : 'dim'}">${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
+        </div>` : `<div class="stat-row" style="padding:12px 16px 6px">
           <div><span class="k">Unrealised</span><b class="${cls(p.pnl)}">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</b><span class="k">${p.cur != null ? `now ${p.cur}` : ''}</span></div>
           <div><span class="k">R</span><b class="${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</b><span class="k">${p.risk != null ? `risking ${moneyIn(p.risk, p.ccy)}` : (p.locked != null ? 'stop beyond entry' : '')}</span></div>
           <div><span class="k">Stop / target</span><b class="num">${p.stopLevel ?? '—'} <span class="dim">/</span> ${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
           <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
-        </div>
+        </div>`}
         <div class="ohlc" id="ohlc">${(() => {
           const h = chartState.hover, rows = chartRows();
           const c = h != null && rows[h] ? rows[h] : rows[rows.length - 1];
@@ -3802,12 +3940,18 @@ if (typeof module !== 'undefined') module.exports = AN;
             + (c.v != null ? `<span><i>V</i> <b>${c.v}</b></span>` : '');
         })()}</div>
         ${chartState.err ? `<div class="card-body"><div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(chartState.err)}</div></div></div>`
-          : `<div class="cw tall" style="padding:0 10px 2px"><canvas id="c-pos"></canvas></div>
-             ${chartState.ind.has('vol') ? '<div class="cw sub" style="padding:0 10px 2px"><canvas id="c-vol"></canvas></div>' : ''}
-             ${chartState.ind.has('rsi') ? '<div class="cw sub" style="padding:0 10px 6px"><canvas id="c-rsi"></canvas></div>' : ''}`}
+          : `<div class="chartrow">${drawBar()}<div class="chartcol">
+               <div class="cw tall" style="padding:0 10px 2px"><canvas id="c-pos"></canvas></div>
+               ${chartState.ind.has('vol') ? '<div class="cw sub" style="padding:0 10px 2px"><canvas id="c-vol"></canvas></div>' : ''}
+               ${chartState.ind.has('rsi') ? '<div class="cw sub" style="padding:0 10px 6px"><canvas id="c-rsi"></canvas></div>' : ''}
+             </div></div>`}
         <div class="chart-hint">${chartState.loading ? 'Loading candles…' : (matchMedia('(hover: hover)').matches
-            ? 'Scroll to zoom time · scroll over the price scale to zoom price · drag to pan'
-            : 'Drag to pan · pinch to zoom · tap a candle for its values')}</div>
+            ? (drawTool() === 'cursor'
+                ? 'Scroll to zoom time · scroll the price scale to zoom price · drag either axis to stretch it · drag to pan · click a drawing to move it, Delete to remove it'
+                : 'Click and drag on the chart to place it · pick the tool again to go back to the cursor')
+            : (drawTool() === 'cursor'
+                ? 'Drag to pan · pinch to zoom · tap a candle for its values · tap a drawing to move it'
+                : 'Drag on the chart to place it · tap the tool again to go back'))}</div>
         <details class="chart-hint" style="padding-bottom:12px"${a ? '' : ' hidden'}><summary style="cursor:pointer">IG data allowance${a ? ` · ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left` : ''}</summary><div class="dim" style="padding-top:6px">Each timeframe costs 150 points once per session, then comes from cache. The price line updates from the position feed and costs nothing.</div></details>
       </div>`;
     el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; chartState.y = null; chartState.x = null; loadCandles(); }));
@@ -3820,14 +3964,29 @@ if (typeof module !== 'undefined') module.exports = AN;
     }));
     el.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => {
       const k = b.dataset.zoom;
+      stopGlide();
       if (k === 'in') zoomX(0.7); else if (k === 'out') zoomX(1.43);
       else if (k === 'all') resetZoom('all');
       else if (k === 'fit') resetZoom();
       else { chartState.y = null; redrawChart(); }        // Levels: refit price around the levels
     }));
+    el.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => {
+      // Picking the same tool twice puts the cursor back, so you are never stuck in drawing mode.
+      chartState.tool = chartState.tool === b.dataset.tool ? 'cursor' : b.dataset.tool;
+      if (chartState.tool !== 'cursor') chartState.sel = null;
+      renderChartPanel();
+    }));
+    const clr = el.querySelector('[data-drawclear]');
+    if (clr) clr.addEventListener('click', () => {
+      if (!confirm(`Remove ${myDraws().length} drawing(s) from this market?`)) return;
+      drawStore()[drawKey()] = [];
+      chartState.sel = null;
+      persist(); renderChartPanel();
+    });
     const tvBtn = el.querySelector('[data-tv]');
     if (tvBtn) tvBtn.addEventListener('click', () => { const c = tvCfg(); c.on = !c.on; persist(); renderChartPanel(); renderTvPanel(); });
-    el.querySelector('[data-chartclose]').addEventListener('click', closeChart);
+    const xb = el.querySelector('[data-chartclose]');
+    if (xb) xb.addEventListener('click', closeChart);
     drawPositionChart(p);
     renderTvPanel();
     if (!chartState.shown) { chartState.shown = true; el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
@@ -3839,61 +3998,114 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Time is the axis a candle chart is read along, and it used to be fixed: every screen got all
   // 150 bars, so a phone drew a 1.2px body and a 0.3px wick — a smear, not a chart. The window is
   // now sized so a candle is about the same width everywhere, and wheel / drag / pinch move it.
+  // ---- chart engine ----
+  // The time axis is a linear index space, not a category. Chart.js rounds a category axis to
+  // whole labels, so every pan stepped a full bar and the view could only travel as far as the
+  // empty slots someone had pre-allocated. Fractional indices let the window glide the way a real
+  // charting package does, and let it run past the last candle as far as you care to push it.
   const Y_SPAN_MIN = 1e-6;
-  const CANDLE_PX = 11;        // target width of one candle slot, so bodies land near 6px
-  const MIN_BARS = 8;
-  // Chart.js clamps a category axis to its labels, so scrolling past the last candle needs real
-  // empty slots to scroll into. They also give the axis its future timestamps.
-  const FUTURE_SLOTS = 40;
-  const MIN_REAL_ON_SCREEN = 3;   // never scroll so far that the price itself leaves the screen
-  const RIGHT_GAP = 0.06;         // a little air after the last candle, the way a trading chart sits
-  const maxSpan = n => n - 1 + Math.round(n * RIGHT_GAP);
+  const CANDLE_PX = 12;           // target width of one candle slot, so a body lands near 9px
+  const MIN_BARS = 6;             // closest zoom: this many candles across the pane
+  const MIN_REAL_ON_SCREEN = 2;   // the only limit on scrolling forward: keep a candle in sight
+  const RIGHT_GAP = 0.08;         // air after the last candle, the way a trading chart sits
+  const maxSpan = n => Math.max(MIN_BARS, n * 1.15 + 4);
   const liveChart = cv => (window.Chart && Chart.getChart(cv)) || null;
+  const p2 = n => String(n).padStart(2, '0');
+
+  // Candle spacing comes from the data rather than the requested resolution, because IG's
+  // resolution names do not always match what it actually returns. The median gap is used so a
+  // weekend hole does not stretch every projected timestamp.
+  function stepMsOf(rows) {
+    const fallback = (chartState && RES_MS[chartState.res]) || 6e4;
+    if (!rows || rows.length < 2) return fallback;
+    const gaps = [];
+    for (let i = 1; i < rows.length; i++) {
+      const d = candleMs(rows[i]) - candleMs(rows[i - 1]);
+      if (isFinite(d) && d > 0) gaps.push(d);
+    }
+    if (!gaps.length) return fallback;
+    gaps.sort((a, b) => a - b);
+    return gaps[gaps.length >> 1] || fallback;
+  }
+  // index -> wall clock. Inside the data the candle's own stamp is used; outside it the median
+  // step is extrapolated, which is what puts real times on the empty space to the right.
+  function idxToMs(i) {
+    const rows = chartRows(); if (!rows.length || !isFinite(i)) return NaN;
+    const step = stepMsOf(rows), last = rows.length - 1;
+    if (i <= 0) return candleMs(rows[0]) + i * step;
+    if (i >= last) return candleMs(rows[last]) + (i - last) * step;
+    const lo = Math.floor(i), a = candleMs(rows[lo]), b = candleMs(rows[lo + 1]);
+    return isFinite(a) && isFinite(b) ? a + (b - a) * (i - lo) : a;
+  }
+  // the inverse, so a drawing pinned to a time survives new candles and timeframe changes
+  function msToIdx(ms) {
+    const rows = chartRows(); if (!rows.length || !isFinite(ms)) return NaN;
+    const step = stepMsOf(rows), last = rows.length - 1;
+    const first = candleMs(rows[0]), end = candleMs(rows[last]);
+    if (ms <= first) return (ms - first) / step;
+    if (ms >= end) return last + (ms - end) / step;
+    let lo = 0, hi = last;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; (candleMs(rows[mid]) <= ms) ? lo = mid : hi = mid; }
+    const a = candleMs(rows[lo]), b = candleMs(rows[hi]);
+    return b > a ? lo + (ms - a) / (b - a) : lo;
+  }
+  function axisLabel(i) {
+    const ms = idxToMs(i); if (!isFinite(ms)) return '';
+    const d = new Date(ms), step = stepMsOf(chartRows());
+    if (step >= 6048e5) return `${MONTHS[d.getUTCMonth()].slice(0, 3)} ${d.getUTCFullYear()}`;
+    if (step >= 864e5) return `${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`;
+    // at the start of a day the date is more use than another midnight reading
+    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return `${p2(d.getUTCDate())} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`;
+    return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+  }
   const redrawChart = () => {
     if (!chartState) return;
-    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
-    if (p) drawPositionChart(p);
+    const p = chartPos();
+    if (!p) return;
+    const cv = hostQ('#c-pos'), chart = cv && liveChart(cv);
+    // Panning used to destroy and rebuild the whole chart on every frame, which is most of why it
+    // felt heavy. Once it exists, only the numbers change.
+    if (chart) { syncChart(chart, p); chart.update('none'); syncSubPanes(); } else drawPositionChart(p);
   };
+
   function defaultWindow(n, widthPx) {
     const fit = Math.round((widthPx || 600) / CANDLE_PX);
     const count = Math.max(MIN_BARS, Math.min(n, fit || n));
-    return { min: Math.max(0, n - count), max: n - 1 + Math.round(count * RIGHT_GAP) };
+    return { min: n - count, max: n - 1 + count * RIGHT_GAP };
   }
   function clampX(win, n) {
-    const span = Math.max(MIN_BARS - 1, Math.min(maxSpan(n), Math.round(win.max - win.min)));
-    let min = Math.round(win.min);
-    // The right edge may sit past the last candle; a few candles must stay on screen.
-    const maxMin = Math.max(0, n - MIN_REAL_ON_SCREEN);
+    let span = win.max - win.min;
+    if (!isFinite(span) || span <= 0) span = MIN_BARS;
+    span = Math.max(MIN_BARS, Math.min(maxSpan(n), span));
+    let min = isFinite(win.min) ? win.min : 0;
+    // Forward is deliberately open: the window may sit almost entirely past the last candle, which
+    // is what makes room to plan a trade to the right of the price.
+    const maxMin = n - MIN_REAL_ON_SCREEN;
+    const minMin = -Math.max(2, span * 0.5);
     if (min > maxMin) min = maxMin;
-    if (min + span > n - 1 + FUTURE_SLOTS) min = n - 1 + FUTURE_SLOTS - span;
-    if (min < 0) min = 0;
+    if (min < minMin) min = minMin;
     return { min, max: min + span };
   }
   function setX(min, max) {
     if (!chartState || !chartRows().length) return false;
-    const next = clampX({ min, max }, chartRows().length);
-    const cur = chartState.x;
-    if (cur && cur.min === next.min && cur.max === next.max) return false;
+    const next = clampX({ min, max }, chartRows().length), cur = chartState.x;
+    if (cur && Math.abs(cur.min - next.min) < 1e-9 && Math.abs(cur.max - next.max) < 1e-9) return false;
     chartState.x = next;
     redrawChart();
     return true;
   }
   function zoomX(factor, anchorIdx) {
-    if (!chartState || !chartState.x || !chartState.candles) return false;
+    if (!chartState || !chartState.x) return false;
     const n = chartRows().length, { min, max } = chartState.x, span = max - min;
-    // A gentle wheel step can round to no change at all; nudge by a bar so every notch does
-    // something, and only report "nothing happened" at the actual limits.
-    let nextSpan = Math.round(span * factor);
-    if (nextSpan === span) nextSpan = factor > 1 ? span + 1 : span - 1;
-    nextSpan = Math.max(MIN_BARS - 1, Math.min(maxSpan(n), nextSpan));
-    if (nextSpan === span) return false;
+    const nextSpan = Math.max(MIN_BARS, Math.min(maxSpan(n), span * factor));
+    if (Math.abs(nextSpan - span) < 1e-9) return false;
     const a = anchorIdx == null ? (min + max) / 2 : Math.max(min, Math.min(max, anchorIdx));
     const frac = span > 0 ? (a - min) / span : 0.5;
     const lo = a - frac * nextSpan;
     return setX(lo, lo + nextSpan);
   }
-  const panX = bars => (!chartState || !chartState.x || !Math.round(bars)) ? false
-    : setX(chartState.x.min + Math.round(bars), chartState.x.max + Math.round(bars));
+  const panX = bars => (!chartState || !chartState.x || !bars) ? false
+    : setX(chartState.x.min + bars, chartState.x.max + bars);
   function setY(min, max) {
     if (!chartState || !isFinite(min) || !isFinite(max) || max - min < Y_SPAN_MIN) return false;
     chartState.y = { min, max };
@@ -3907,115 +4119,521 @@ if (typeof module !== 'undefined') module.exports = AN;
     const a = anchor == null ? (cur.min + cur.max) / 2 : anchor;
     return setY(a - (a - cur.min) * factor, a + (cur.max - a) * factor);
   }
+  let glideRaf = 0;
+  const stopGlide = () => { if (glideRaf) { cancelAnimationFrame(glideRaf); glideRaf = 0; } };
+  // A flick keeps travelling and settles, instead of stopping dead under the finger that threw it.
+  const startGlide = vel => {
+    let v = vel, last = performance.now();
+    const tick = now => {
+      const dt = Math.min(64, now - last); last = now;
+      v *= Math.pow(0.94, dt / 16);
+      if (Math.abs(v) < 0.0008 || !chartState || !panX(v * dt)) { glideRaf = 0; return; }
+      glideRaf = requestAnimationFrame(tick);
+    };
+    glideRaf = requestAnimationFrame(tick);
+  };
   function resetZoom(kind) {
     if (!chartState) return;
+    stopGlide();
     const n = chartRows().length;
-    if (kind === 'all') {                              // everything: every candle, full price range
-      if (n) chartState.x = { min: 0, max: maxSpan(n) };
+    if (kind === 'all') {
+      // All means all: go to the widest window the zoom allows, so the wheel has nothing left to
+      // give and hands the gesture back to the page.
+      if (n) { const right = n - 1 + n * RIGHT_GAP; chartState.x = { min: right - maxSpan(n), max: right }; }
       if (chartState.fullRange) {
         const r = chartState.fullRange, pad = (r.max - r.min) * 0.06 || 1;
         chartState.y = { min: r.min - pad, max: r.max + pad };
       } else chartState.y = null;
-    } else {                                           // back to the readable default on both axes
+    } else {
       chartState.y = null;
-      const cv = $('#c-pos');
+      const cv = hostQ('#c-pos');
       if (n) chartState.x = defaultWindow(n, cv ? cv.clientWidth : 0);
     }
     redrawChart();
   }
+
+  // The price window follows what is on screen, so zooming into a quiet stretch fills the pane.
+  // Levels are pulled in only when they do not swamp the view; the Levels button frames them
+  // deliberately instead.
+  function priceRange(p, win) {
+    const rows = chartRows();
+    const i0 = Math.max(0, Math.floor(win.min)), i1 = Math.min(rows.length - 1, Math.ceil(win.max));
+    const vis = i1 >= i0 ? rows.slice(i0, i1 + 1) : [];
+    const marks = [p.level, p.stopLevel, p.limitLevel, p.cur].filter(v => v != null && isFinite(v));
+    let lo, hi;
+    if (vis.length) { lo = Math.min(...vis.map(c => c.l)); hi = Math.max(...vis.map(c => c.h)); }
+    else if (marks.length) { lo = Math.min(...marks); hi = Math.max(...marks); }
+    else return { min: 0, max: 1, dp: 2 };
+    const visSpan = (hi - lo) || Math.abs(hi) * 0.001 || 1;
+    for (const m of marks) {
+      const a = Math.min(lo, m), b = Math.max(hi, m);
+      // On an order ticket the stop and target are the whole point, so they are always framed.
+      // On an open position a distant level would flatten the candles, so it is only pulled in
+      // when it fits; the Levels button frames them deliberately.
+      if (p.preview || b - a <= visSpan * 1.25) { lo = a; hi = b; }
+    }
+    const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.001 || 1;
+    chartState.autoRange = { min: lo - pad, max: hi + pad };
+    chartState.fullRange = { min: Math.min(...rows.map(c => c.l), ...marks), max: Math.max(...rows.map(c => c.h), ...marks) };
+    const min = chartState.y ? chartState.y.min : lo - pad;
+    const max = chartState.y ? chartState.y.max : hi + pad;
+    const span = max - min;
+    return { min, max, dp: span < 0.05 ? 5 : span < 1 ? 4 : span < 20 ? 3 : 2 };
+  }
+
+  // ---- candles ----
+  // Chart.js has no candlestick type, and floating bars could not give a doji a visible body or
+  // keep the gutter between candles constant. Drawing them costs about thirty lines and looks
+  // like the thing it is meant to be.
+  const candlePaint = {
+    id: 'candlePaint',
+    beforeDatasetsDraw(chart, args, opts) {
+      const rows = opts && opts.rows; if (!rows || !rows.length) return;
+      const { ctx, chartArea: a, scales: { x, y } } = chart;
+      const slot = Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) || 1;
+      // A candle keeps a one-pixel gutter and never gets so fat it reads as a column chart.
+      const bodyW = Math.max(1, Math.min(slot - 1, slot * 0.78, 26));
+      const wickW = bodyW >= 5 ? Math.max(1, Math.round(bodyW * 0.16)) : 1;
+      const outline = bodyW >= 4;
+      const i0 = Math.max(0, Math.floor(x.min) - 1), i1 = Math.min(rows.length - 1, Math.ceil(x.max) + 1);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+      for (let i = i0; i <= i1; i++) {
+        const c = rows[i]; if (!c) continue;
+        const col = c.c >= c.o ? opts.up : opts.down;
+        const cx = x.getPixelForValue(i);
+        const yh = y.getPixelForValue(c.h), yl = y.getPixelForValue(c.l);
+        const yo = y.getPixelForValue(c.o), yc = y.getPixelForValue(c.c);
+        const top = Math.min(yo, yc), bot = Math.max(yo, yc);
+        ctx.fillStyle = col; ctx.strokeStyle = col;
+        const wx = Math.round(cx - wickW / 2);
+        ctx.fillRect(wx, Math.min(yh, yl), Math.max(1, wickW), Math.max(1, Math.abs(yl - yh)));
+        // a minimum of one pixel, so an open equal to the close is a line rather than nothing
+        const bx = Math.round(cx - bodyW / 2), bw = Math.max(1, Math.round(bodyW));
+        const bh = Math.max(1, bot - top);
+        ctx.fillRect(bx, top, bw, bh);
+        if (outline && bh > 2) { ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, Math.round(top) + 0.5, bw - 1, Math.round(bh) - 1); }
+      }
+      ctx.restore();
+    },
+  };
+  const volPaint = {
+    id: 'volPaint',
+    beforeDatasetsDraw(chart, args, opts) {
+      const rows = opts && opts.rows; if (!rows || !rows.length) return;
+      const { ctx, chartArea: a, scales: { x, y } } = chart;
+      const slot = Math.abs(x.getPixelForValue(1) - x.getPixelForValue(0)) || 1;
+      const w = Math.max(1, Math.min(slot - 1, slot * 0.72, 26));
+      const i0 = Math.max(0, Math.floor(x.min) - 1), i1 = Math.min(rows.length - 1, Math.ceil(x.max) + 1);
+      const zero = y.getPixelForValue(0);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+      ctx.globalAlpha = 0.55;
+      for (let i = i0; i <= i1; i++) {
+        const c = rows[i]; if (!c || c.v == null) continue;
+        ctx.fillStyle = c.c >= c.o ? opts.up : opts.down;
+        const top = y.getPixelForValue(c.v);
+        ctx.fillRect(Math.round(x.getPixelForValue(i) - w / 2), top, Math.max(1, Math.round(w)), Math.max(1, zero - top));
+      }
+      ctx.restore();
+    },
+  };
+
+  // ---- drawings ----
+  // Anchored to time and price rather than to a candle index, so a drawing stays where it was put
+  // when new candles arrive or the timeframe changes.
+  const DRAW_TOOLS = [
+    ['cursor', 'Select', 'Select, move and pan', '<path d="M5 3v15.5l4-3.7 2.6 5.6 2.4-1.1-2.6-5.4 5.2-.4z"/>'],
+    ['hline', 'Line', 'Horizontal line at a price', '<path d="M3 12h18"/>'],
+    ['trend', 'Trend', 'Trend line between two points', '<path d="M5 18.5 19 5.5"/><circle cx="5" cy="18.5" r="1.8"/><circle cx="19" cy="5.5" r="1.8"/>'],
+    ['ray', 'Ray', 'A trend line that carries on to the right', '<path d="M4 19 20 6M20 6h-5M20 6v5"/>'],
+    ['rect', 'Box', 'Rectangle, for marking a zone', '<path d="M4 6h16v12H4z"/>'],
+    ['fib', 'Fib', 'Fibonacci retracement between two points', '<path d="M3 5h18M3 11h18M3 15h18M3 19h18"/>'],
+    ['long', 'Long', 'Long position: entry, target and stop', '<path d="M5 19h14M12 19V6M12 6 8.5 9.5M12 6l3.5 3.5"/>'],
+    ['short', 'Short', 'Short position: entry, target and stop', '<path d="M5 5h14M12 5v13M12 18l-3.5-3.5M12 18l3.5-3.5"/>'],
+  ];
+  // The rail lives down the left of the panes, where a charting package puts it, rather than in
+  // the card header where it pushed the timeframes onto a second line.
+  const drawBar = () => `<div class="drawbar" role="toolbar" aria-label="Drawing tools">
+      ${DRAW_TOOLS.map(([k, l, t, d]) => `<button data-tool="${k}" class="${drawTool() === k ? 'active' : ''}" title="${t}" aria-label="${t}" aria-pressed="${drawTool() === k}"><svg viewBox="0 0 24 24">${d}</svg></button>`).join('')}
+      ${myDraws().length ? `<div class="sep"></div><button data-drawclear title="Remove all ${myDraws().length} drawings on this market" aria-label="Remove all drawings"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg></button>` : ''}
+    </div>`;
+  const FIBS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+  const drawStore = () => (S.settings.draws = S.settings.draws || {});
+  const drawKey = () => {
+    if (!chartState) return '';
+    const p = chartPos();
+    return p ? (p.epic || p.market || '') : '';
+  };
+  function myDraws() {
+    const k = drawKey(); if (!k) return [];
+    const all = drawStore();
+    if (!Array.isArray(all[k])) all[k] = [];
+    return all[k];
+  }
+  const drawTool = () => (chartState && chartState.tool) || 'cursor';
+  const newId = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+  const drawPaint = {
+    id: 'drawPaint',
+    afterDatasetsDraw(chart, args, opts) {
+      const list = opts && opts.list; if (!list || !list.length) return;
+      const { ctx, chartArea: a, scales: { x, y } } = chart;
+      const X = t => x.getPixelForValue(msToIdx(t));
+      const Y = v => y.getPixelForValue(v);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+      ctx.font = '600 10px Inter, system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      for (const d of list) paintDrawing(ctx, d, X, Y, a, opts, d.id === opts.sel);
+      ctx.restore();
+    },
+  };
+  function paintDrawing(ctx, d, X, Y, a, opts, sel) {
+    const accent = opts.accent, up = opts.up, down = opts.down, upRgb = opts.upRgb, downRgb = opts.downRgb;
+    const col = d.color || accent;
+    const handles = [];
+    // On a phone the plot is narrow enough that an unclamped label runs off into the price scale,
+    // so a tag is nudged back inside and dropped altogether when it would swamp the pane.
+    const tag = (text, px, py, fill, ink) => {
+      const w = ctx.measureText(text).width + 8;
+      if (w > (a.right - a.left) * 0.5) return;
+      const x0 = Math.max(a.left + 1, Math.min(px, a.right - w - 1));
+      ctx.fillStyle = fill; ctx.fillRect(x0, py - 8, w, 16);
+      ctx.fillStyle = ink || '#fff'; ctx.fillText(text, x0 + 4, py);
+    };
+    ctx.lineWidth = sel ? 2 : 1.5;
+    ctx.strokeStyle = col;
+    ctx.setLineDash([]);
+    if (d.type === 'hline') {
+      const py = Y(d.a.p);
+      ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+      tag(fmtPrice(d.a.p), a.left + 4, py, col, col === accent ? opts.accentInk : '#fff');
+      handles.push([(a.left + a.right) / 2, py]);
+    } else if (d.type === 'trend' || d.type === 'ray') {
+      let x1 = X(d.a.t), y1 = Y(d.a.p), x2 = X(d.b.t), y2 = Y(d.b.p);
+      if (d.type === 'ray' && x2 !== x1) {
+        // carry the slope to the right edge of the pane
+        const m = (y2 - y1) / (x2 - x1);
+        if (x2 >= x1) { y2 = y1 + m * (a.right - x1); x2 = a.right; }
+        else { y2 = y1 + m * (a.left - x1); x2 = a.left; }
+      }
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      handles.push([X(d.a.t), Y(d.a.p)], [X(d.b.t), Y(d.b.p)]);
+    } else if (d.type === 'rect') {
+      const x1 = X(d.a.t), x2 = X(d.b.t), y1 = Y(d.a.p), y2 = Y(d.b.p);
+      const l = Math.min(x1, x2), t = Math.min(y1, y2), w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+      ctx.fillStyle = `rgb(${accentRgb(opts)} / 0.10)`;
+      ctx.fillRect(l, t, w, h);
+      ctx.strokeRect(l, t, w, h);
+      handles.push([x1, y1], [x2, y2]);
+    } else if (d.type === 'fib') {
+      const x1 = X(d.a.t), x2 = X(d.b.t), hi = d.a.p, lo = d.b.p;
+      const l = Math.min(x1, x2), r = Math.max(x1, x2);
+      ctx.setLineDash([4, 3]);
+      for (const f of FIBS) {
+        const v = hi + (lo - hi) * f, py = Y(v);
+        ctx.beginPath(); ctx.moveTo(l, py); ctx.lineTo(Math.max(r, a.right), py); ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.fillText(`${(f * 100).toFixed(1)}%  ${fmtPrice(v)}`, l + 4, py - 7);
+      }
+      ctx.setLineDash([]);
+      handles.push([x1, Y(d.a.p)], [x2, Y(d.b.p)]);
+    } else if (d.type === 'pos') {
+      // The trade planner: profit zone in the profit colour, risk zone in the loss colour, both
+      // taken from whichever palette is set in Settings.
+      const x1 = X(d.a.t), x2 = X(d.b.t);
+      const l = Math.min(x1, x2), r = Math.max(x1, x2), w = Math.max(2, r - l);
+      const ye = Y(d.a.p), yt = Y(d.target), ys = Y(d.stop);
+      ctx.fillStyle = `rgb(${upRgb} / 0.18)`;
+      ctx.fillRect(l, Math.min(ye, yt), w, Math.abs(yt - ye));
+      ctx.fillStyle = `rgb(${downRgb} / 0.18)`;
+      ctx.fillRect(l, Math.min(ye, ys), w, Math.abs(ys - ye));
+      ctx.strokeStyle = up; ctx.lineWidth = 1;
+      ctx.strokeRect(l, Math.min(ye, yt), w, Math.abs(yt - ye));
+      ctx.strokeStyle = down;
+      ctx.strokeRect(l, Math.min(ye, ys), w, Math.abs(ys - ye));
+      ctx.strokeStyle = accent; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(l, ye); ctx.lineTo(r, ye); ctx.stroke();
+      const risk = Math.abs(d.a.p - d.stop), reward = Math.abs(d.target - d.a.p);
+      const rr = risk ? (reward / risk) : 0;
+      tag(`${d.side === 'short' ? 'Short' : 'Long'} ${fmtPrice(d.a.p)}`, l + 4, ye, accent, opts.accentInk);
+      tag(`Target ${fmtPrice(d.target)}`, l + 4, yt, up);
+      tag(`Stop ${fmtPrice(d.stop)}`, l + 4, ys, down);
+      const mid = (Math.min(ye, yt) + Math.max(ye, yt)) / 2;
+      if (rr) tag(`${rr.toFixed(2)}R`, r - ctx.measureText(`${rr.toFixed(2)}R`).width - 12, mid, up);
+      handles.push([r, ye], [l + w / 2, yt], [l + w / 2, ys], [l, ye]);
+    }
+    if (sel) {
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = accent; ctx.lineWidth = 1.5;
+      for (const [hx, hy] of handles) {
+        ctx.beginPath(); ctx.arc(hx, hy, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+    }
+  }
+  const accentRgb = opts => opts.accentRgb || '120 140 255';
+  function fmtPrice(v) {
+    if (!isFinite(v)) return '—';
+    const m = Math.abs(v);
+    return v.toFixed(m < 10 ? 4 : m < 1000 ? 2 : 1);
+  }
+
+  // Hit-testing runs in pixel space, which is the only space where "near enough to grab" means
+  // the same thing at every zoom level.
+  function drawHandles(chart, d) {
+    const { chartArea: a, scales: { x, y } } = chart;
+    const X = t => x.getPixelForValue(msToIdx(t)), Y = v => y.getPixelForValue(v);
+    if (d.type === 'hline') return [{ k: 'a', x: (a.left + a.right) / 2, y: Y(d.a.p) }];
+    if (d.type === 'pos') {
+      const x1 = X(d.a.t), x2 = X(d.b.t), l = Math.min(x1, x2), r = Math.max(x1, x2);
+      return [{ k: 'b', x: r, y: Y(d.a.p) }, { k: 'target', x: (l + r) / 2, y: Y(d.target) },
+              { k: 'stop', x: (l + r) / 2, y: Y(d.stop) }, { k: 'a', x: l, y: Y(d.a.p) }];
+    }
+    return [{ k: 'a', x: X(d.a.t), y: Y(d.a.p) }, { k: 'b', x: X(d.b.t), y: Y(d.b.p) }];
+  }
+  function hitDrawing(chart, px, py) {
+    const list = myDraws();
+    const { chartArea: a, scales: { x, y } } = chart;
+    const X = t => x.getPixelForValue(msToIdx(t)), Y = v => y.getPixelForValue(v);
+    // newest first, so the thing drawn last is the thing you grab
+    for (let i = list.length - 1; i >= 0; i--) {
+      const d = list[i];
+      for (const h of drawHandles(chart, d)) {
+        if (Math.hypot(h.x - px, h.y - py) <= 9) return { d, part: h.k };
+      }
+      if (d.type === 'hline') { if (Math.abs(Y(d.a.p) - py) <= 6) return { d, part: 'body' }; continue; }
+      if (d.type === 'pos') {
+        const x1 = X(d.a.t), x2 = X(d.b.t), l = Math.min(x1, x2), r = Math.max(x1, x2);
+        const lo = Math.min(Y(d.target), Y(d.stop)), hi = Math.max(Y(d.target), Y(d.stop));
+        if (px >= l && px <= r && py >= lo && py <= hi) return { d, part: 'body' };
+        continue;
+      }
+      if (d.type === 'rect' || d.type === 'fib') {
+        const l = Math.min(X(d.a.t), X(d.b.t)), r = Math.max(X(d.a.t), X(d.b.t));
+        const t = Math.min(Y(d.a.p), Y(d.b.p)), b = Math.max(Y(d.a.p), Y(d.b.p));
+        if (px >= l - 4 && px <= r + 4 && py >= t - 4 && py <= b + 4) return { d, part: 'body' };
+        continue;
+      }
+      // a segment: distance from the point to the line, clamped to the segment
+      const x1 = X(d.a.t), y1 = Y(d.a.p);
+      let x2 = X(d.b.t), y2 = Y(d.b.p);
+      if (d.type === 'ray' && x2 !== x1) { const m = (y2 - y1) / (x2 - x1); y2 = y1 + m * (a.right - x1); x2 = a.right; }
+      const vx = x2 - x1, vy = y2 - y1, len2 = vx * vx + vy * vy;
+      const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * vx + (py - y1) * vy) / len2)) : 0;
+      if (Math.hypot(x1 + t * vx - px, y1 + t * vy - py) <= 7) return { d, part: 'body' };
+    }
+    return null;
+  }
+  function seedDrawing(tool, t, p, chart) {
+    const span = chartState.x.max - chartState.x.min;
+    const stepMs = stepMsOf(chartRows());
+    const wide = t + Math.max(1, Math.round(span * 0.18)) * stepMs;
+    const yr = chart.scales.y, unit = Math.abs(yr.max - yr.min) * 0.12 || 1;
+    if (tool === 'hline') return { id: newId(), type: 'hline', a: { t, p }, b: { t, p } };
+    if (tool === 'long' || tool === 'short') {
+      const dir = tool === 'long' ? 1 : -1;
+      return { id: newId(), type: 'pos', side: tool, a: { t, p }, b: { t: wide, p },
+               target: p + dir * unit * 2, stop: p - dir * unit };
+    }
+    return { id: newId(), type: tool, a: { t, p }, b: { t: wide, p: p - unit } };
+  }
+  function moveDrawing(d, part, t, p, from) {
+    if (part === 'body') {
+      const dt = t - from.t, dp = p - from.p;
+      d.a = { t: from.d.a.t + dt, p: from.d.a.p + dp };
+      d.b = { t: from.d.b.t + dt, p: from.d.b.p + dp };
+      if (d.type === 'pos') { d.target = from.d.target + dp; d.stop = from.d.stop + dp; }
+      return;
+    }
+    if (part === 'target' || part === 'stop') { d[part] = p; return; }
+    if (d.type === 'hline') { d.a = { t: d.a.t, p }; d.b = { t: d.b.t, p }; return; }
+    if (d.type === 'pos' && part === 'b') { d.b = { t, p: d.b.p }; return; }
+    if (d.type === 'pos' && part === 'a') {
+      const dp = p - d.a.p;
+      d.target += dp; d.stop += dp; d.a = { t, p };
+      return;
+    }
+    d[part] = { t, p };
+  }
+
+  // ---- pointer, wheel and keyboard ----
+  // Everything the chart responds to lives here: wheel zoom on either axis, drag to pan with a
+  // little inertia after the flick, drag on an axis to stretch it, and drawing when a tool is up.
   function attachZoom(cv) {
     if (cv.dataset.zoomed) return;
     cv.dataset.zoomed = '1';
-    // Look the chart up on each event: drawPositionChart destroys and rebuilds it on every poll,
-    // so a captured instance goes stale and reports the scales from a previous frame.
+    // The chart is looked up per event rather than captured: it is replaced whenever the panel
+    // re-renders, and a captured instance reports scales from a frame that no longer exists.
     const at = ev => {
       const chart = liveChart(cv); if (!chart) return null;
       const r = cv.getBoundingClientRect();
       const px = ev.clientX - r.left, py = ev.clientY - r.top;
       const { x, y } = chart.scales, a = chart.chartArea;
-      return { idx: x.getValueForPixel(px), price: (py >= y.top && py <= y.bottom) ? y.getValueForPixel(py) : null,
+      return { chart, px, py, idx: x.getValueForPixel(px), price: y.getValueForPixel(py),
                plotW: Math.max(1, x.right - x.left), plotH: Math.max(1, y.bottom - y.top),
-               // right of the plot is the price scale, below it the time scale
+               inPlot: !!a && px >= a.left && px <= a.right && py >= a.top && py <= a.bottom,
                onPriceAxis: !!a && px > a.right, onTimeAxis: !!a && py > a.bottom };
     };
+
     cv.addEventListener('wheel', ev => {
       if (!chartState) return;
+      stopGlide();
       const pos = at(ev); if (!pos) return;
-      // Shift is the usual modifier for the cross axis; plain wheel scales time.
-      // Scale the step by how hard the wheel was turned, so a trackpad nudge is a nudge. A full
-      // mouse notch is ~10% rather than the ~20% that made the chart jump away from you.
       const mag = Math.min(150, Math.abs(ev.deltaY) || 100) / 150;
       const factor = ev.deltaY > 0 ? 1 + 0.10 * mag : 1 / (1 + 0.10 * mag);
       // Over the price scale the wheel stretches price; anywhere else it stretches time. Shift
-      // still forces price, for anyone who would rather not travel to the axis.
+      // forces price, for anyone who would rather not travel to the axis.
       const changed = (pos.onPriceAxis || ev.shiftKey)
         ? zoomBy(factor, pos.onPriceAxis ? null : pos.price)
         : zoomX(factor, pos.idx);
-      // Only swallow the gesture when it did something. At the extremes the page scrolls on,
-      // instead of the chart silently eating every scroll that crosses it.
+      // Only swallow the gesture when it did something, so at the extremes the page scrolls on
+      // rather than the chart silently eating every scroll that crosses it.
       if (changed) ev.preventDefault();
     }, { passive: false });
 
-    let drag = null;
+    let drag = null, make = null;
     const pts = new Map();
+    const commit = () => { persist(); redrawChart(); };
+
     cv.addEventListener('pointerdown', ev => {
-      if (!chartState) return;
+      if (!chartState || !chartState.x) return;
+      stopGlide();
       pts.set(ev.pointerId, ev);
-      if (pts.size === 1) {
-        const pos = at(ev);
-        drag = { x: ev.clientX, y: ev.clientY, win: { ...chartState.x }, range: { ...(chartState.y || chartState.autoRange || {}) },
-                 barsPerPx: pos ? (chartState.x.max - chartState.x.min + 1) / pos.plotW : 0, plotH: pos ? pos.plotH : 1 };
-        try { cv.setPointerCapture(ev.pointerId); } catch { /* capture is a nicety, not required to pan */ }
-        cv.style.cursor = 'grabbing';
-      }
       if (pts.size === 2) {
-        drag = null;
+        drag = make = null;
         const [a, b] = [...pts.values()];
         chartState._pinch = { dx: Math.abs(a.clientX - b.clientX) || 1, dy: Math.abs(a.clientY - b.clientY) || 1,
                               win: { ...chartState.x }, range: { ...(chartState.y || chartState.autoRange || {}) } };
+        return;
       }
+      if (pts.size !== 1) return;
+      const pos = at(ev); if (!pos) return;
+      try { cv.setPointerCapture(ev.pointerId); } catch { /* capture is a nicety, not required */ }
+      const tool = drawTool();
+      if (tool !== 'cursor' && pos.inPlot) {
+        const d = seedDrawing(tool, idxToMs(pos.idx), pos.price, pos.chart);
+        myDraws().push(d);
+        chartState.sel = d.id;
+        make = { d, part: d.type === 'pos' ? 'b' : 'b' };
+        ev.preventDefault();
+        redrawChart();
+        return;
+      }
+      if (tool === 'cursor' && pos.inPlot) {
+        const hit = hitDrawing(pos.chart, pos.px, pos.py);
+        if (hit) {
+          chartState.sel = hit.d.id;
+          make = { d: hit.d, part: hit.part,
+                   from: { t: idxToMs(pos.idx), p: pos.price, d: JSON.parse(JSON.stringify(hit.d)) } };
+          ev.preventDefault();
+          redrawChart();
+          return;
+        }
+        if (chartState.sel) { chartState.sel = null; redrawChart(); }
+      }
+      drag = { x: ev.clientX, y: ev.clientY, t: performance.now(), vx: 0,
+               mode: pos.onPriceAxis ? 'scaleY' : pos.onTimeAxis ? 'scaleX' : 'pan',
+               win: { ...chartState.x }, range: { ...(chartState.y || chartState.autoRange || {}) },
+               barsPerPx: (chartState.x.max - chartState.x.min) / pos.plotW, plotH: pos.plotH, plotW: pos.plotW };
+      cv.style.cursor = drag.mode === 'pan' ? 'grabbing' : cv.style.cursor;
     });
+
     cv.addEventListener('pointermove', ev => {
       if (!pts.has(ev.pointerId) || !chartState) return;
       pts.set(ev.pointerId, ev);
       const pin = chartState._pinch;
       if (pts.size === 2 && pin) {
         const [a, b] = [...pts.values()];
-        // Each axis follows the spread along that axis, so one gesture can widen time and price.
         const dx = Math.abs(a.clientX - b.clientX) || 1, dy = Math.abs(a.clientY - b.clientY) || 1;
         const span = pin.win.max - pin.win.min;
-        // Damped: the raw distance ratio made a small finger movement swing the whole window.
-        setX(pin.win.min, pin.win.min + span * Math.pow(pin.dx / dx, 0.65));
-        if (isFinite(pin.range.min) && Math.abs(dy / pin.dy - 1) > 0.05) {
-          const mid = (pin.range.min + pin.range.max) / 2, half = (pin.range.max - pin.range.min) / 2 * Math.pow(pin.dy / dy, 0.65);
+        setX(pin.win.min, pin.win.min + span * Math.pow(pin.dx / dx, 0.8));
+        if (isFinite(pin.range.min) && Math.abs(dy / pin.dy - 1) > 0.04) {
+          const mid = (pin.range.min + pin.range.max) / 2;
+          const half = (pin.range.max - pin.range.min) / 2 * Math.pow(pin.dy / dy, 0.8);
           setY(mid - half, mid + half);
         }
         return;
       }
-      if (drag && pts.size === 1) {
-        panX(-(ev.clientX - drag.x) * drag.barsPerPx + (drag.win.min - chartState.x.min));
-        if (isFinite(drag.range.min)) {
-          const perPx = (drag.range.max - drag.range.min) / drag.plotH;
-          const shift = (ev.clientY - drag.y) * perPx;      // drag down moves the window up
-          setY(drag.range.min + shift, drag.range.max + shift);
-        }
+      if (make) {
+        const pos = at(ev); if (!pos) return;
+        moveDrawing(make.d, make.part, idxToMs(pos.idx), pos.price, make.from);
+        redrawChart();
+        return;
+      }
+      if (!drag || pts.size !== 1) return;
+      if (drag.mode === 'scaleY') {
+        // Dragging the price scale squeezes or stretches price around its middle, like TradingView.
+        const cur = chartState.y || chartState.autoRange; if (!cur) return;
+        const f = Math.exp((ev.clientY - drag.y) / 220);
+        const mid = (drag.range.min + drag.range.max) / 2, half = (drag.range.max - drag.range.min) / 2 * f;
+        setY(mid - half, mid + half);
+        return;
+      }
+      if (drag.mode === 'scaleX') {
+        const f = Math.exp(-(ev.clientX - drag.x) / 220);
+        const span = (drag.win.max - drag.win.min) * f;
+        setX(drag.win.max - span, drag.win.max);
+        return;
+      }
+      const now = performance.now(), dt = Math.max(1, now - drag.t);
+      const target = drag.win.min - (ev.clientX - drag.x) * drag.barsPerPx;
+      drag.vx = (target - chartState.x.min) / dt;
+      drag.t = now;
+      panX(target - chartState.x.min);
+      if (isFinite(drag.range.min)) {
+        const perPx = (drag.range.max - drag.range.min) / drag.plotH;
+        const shift = (ev.clientY - drag.y) * perPx;             // drag down moves the window up
+        setY(drag.range.min + shift, drag.range.max + shift);
       }
     });
+
     const end = ev => {
       pts.delete(ev.pointerId);
       if (pts.size < 2 && chartState) chartState._pinch = null;
-      if (!pts.size) { drag = null; cv.style.cursor = ''; }
+      if (make) {
+        // A tap with a tool up, rather than a drag, still leaves a usable default-sized drawing.
+        commit();
+        if (drawTool() !== 'cursor') { chartState.tool = 'cursor'; renderChartPanel(); }
+        make = null;
+      }
+      if (!pts.size) {
+        // Capped: a very fast flick (or a synthetic pointer moved in zero time) reports a huge
+        // velocity, and the chart should coast, not bolt.
+        if (drag && drag.mode === 'pan' && Math.abs(drag.vx) > 0.0015 && performance.now() - drag.t < 90) {
+          startGlide(Math.max(-0.06, Math.min(0.06, drag.vx)));
+        }
+        drag = null; cv.style.cursor = '';
+      }
     };
     cv.addEventListener('pointerup', end);
     cv.addEventListener('pointercancel', end);
-    cv.addEventListener('dblclick', () => resetZoom());
+    cv.addEventListener('dblclick', () => { stopGlide(); resetZoom(); });
     cv.addEventListener('pointermove', ev => {
-      if (drag || pts.size) return;
-      const pos = at(ev);
-      cv.style.cursor = pos && pos.onPriceAxis ? 'ns-resize' : pos && pos.onTimeAxis ? 'ew-resize' : 'grab';
+      if (drag || make || pts.size) return;
+      const pos = at(ev); if (!pos) return;
+      if (pos.onPriceAxis) { cv.style.cursor = 'ns-resize'; return; }
+      if (pos.onTimeAxis) { cv.style.cursor = 'ew-resize'; return; }
+      if (drawTool() !== 'cursor') { cv.style.cursor = 'crosshair'; return; }
+      cv.style.cursor = hitDrawing(pos.chart, pos.px, pos.py) ? 'move' : 'grab';
     });
   }
-
+  // Delete removes whatever is selected. Bound once on the document, because the canvas is
+  // replaced on every re-render and would lose a listener bound to it.
+  if (!window.__drawKeys) {
+    window.__drawKeys = true;
+    document.addEventListener('keydown', ev => {
+      if (!chartState || !chartState.sel) return;
+      if (ev.key !== 'Delete' && ev.key !== 'Backspace') return;
+      const t = ev.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const list = myDraws(), i = list.findIndex(d => d.id === chartState.sel);
+      if (i < 0) return;
+      list.splice(i, 1);
+      chartState.sel = null;
+      persist(); redrawChart();
+      ev.preventDefault();
+    });
+  }
 
   function attachCrosshair(cv) {
     if (cv.dataset.crossed) return;
@@ -4036,14 +4654,15 @@ if (typeof module !== 'undefined') module.exports = AN;
       const r = cv.getBoundingClientRect();
       chartState.cross = { x: ev.clientX - r.left, y: ev.clientY - r.top };
       const idx = chart.scales.x.getValueForPixel(chartState.cross.x);
-      // clamp to real candles: the slots past the last one carry no prices to read out
+      chartState.cross.label = axisLabel(idx);
+      // clamp to real candles: the space past the last one carries no prices to read out
       pending = Math.max(0, Math.min(chartRows().length - 1, Math.round(idx)));
       if (pending !== chartState.hover) { chartState.hover = pending; paintOhlc(); }
       schedule();
     };
     cv.addEventListener('pointermove', move);
     // A finger has no hover, so a tap has to place the readout explicitly.
-    cv.addEventListener('pointerdown', ev => { if (ev.pointerType !== 'mouse') move(ev); });
+    cv.addEventListener('pointerdown', ev => { if (ev.pointerType !== 'mouse' && drawTool() === 'cursor') move(ev); });
     cv.addEventListener('pointerleave', () => {
       if (!chartState) return;
       chartState.cross = null; chartState.hover = null;
@@ -4054,7 +4673,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   // repaint just the readout rather than the whole panel, which would kill the pointer state
   function paintOhlc() {
-    const el = $('#ohlc'); if (!el || !chartState) return;
+    const el = hostQ('#ohlc'); if (!el || !chartState) return;
     const rows = chartRows();
     const c = chartState.hover != null && rows[chartState.hover] ? rows[chartState.hover] : rows[rows.length - 1];
     if (!c) { el.innerHTML = ''; return; }
@@ -4067,20 +4686,114 @@ if (typeof module !== 'undefined') module.exports = AN;
           return `<span class="${d >= 0 ? 'profit' : 'loss'}">${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(dpv)} (${d >= 0 ? '+' : '−'}${Math.abs(d / c.o * 100).toFixed(2)}%)</span>`; })();
   }
 
-  function drawSubPanes(rows, labels, win) {
-    const kill = id => { const el = document.getElementById(id); if (!el) return null;
+  // ---- building and refreshing ----
+  const xAxisConfig = (win, showLabels) => ({
+    type: 'linear', min: win.min, max: win.max, offset: false,
+    grid: { display: true, color: cssVar('--grid'), drawTicks: false },
+    ticks: { color: cssVar('--text-3'), font: { size: 10 }, autoSkip: false, maxRotation: 0,
+             display: showLabels !== false, callback: v => (showLabels === false ? '' : axisLabel(v)) },
+    // Ticks land on whole candles at a spacing that leaves the labels room to breathe.
+    afterBuildTicks: axis => {
+      const span = axis.max - axis.min;
+      const width = Math.max(120, axis.width || (axis.right - axis.left) || 600);
+      const want = Math.max(2, Math.min(10, Math.floor(width / 92)));
+      const raw = Math.max(1, span / want);
+      const steps = [1, 2, 5, 10, 15, 20, 30, 60, 120, 180, 240, 360, 720, 1440];
+      const step = steps.find(v => v >= raw) || Math.ceil(raw / 1000) * 1000;
+      const out = [];
+      for (let i = Math.ceil(axis.min / step) * step; i <= axis.max && out.length < 40; i += step) out.push({ value: i });
+      axis.ticks = out;
+    },
+  });
+
+  function syncChart(chart, p) {
+    const rows = chartRows();
+    const win = chartState.x = clampX(chartState.x, rows.length);
+    const yr = priceRange(p, win);
+    const up = cssVar('--profit'), down = cssVar('--loss'), accent = cssVar('--accent');
+    chart.data.labels = undefined;
+    chart.data.datasets = INDICATORS.filter(i => i.overlay !== false && chartState.ind.has(i.k)).map(i => ({
+      type: 'line', label: i.label,
+      data: i.fn(rows).map((v, k) => ({ x: k, y: v })).filter(pt => pt.y != null && isFinite(pt.y)),
+      borderColor: i.color(), borderWidth: 1.4, pointRadius: 0, tension: 0.2, fill: false, spanGaps: false,
+    }));
+    const sx = chart.options.scales.x;
+    sx.min = win.min; sx.max = win.max;
+    chart.options.scales.y.min = yr.min; chart.options.scales.y.max = yr.max;
+    chart.options.scales.y.ticks.callback = v => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(yr.dp));
+    const pl = chart.options.plugins;
+    pl.candlePaint.rows = rows; pl.candlePaint.up = up; pl.candlePaint.down = down;
+    pl.crosshair.dp = yr.dp; pl.crosshair.color = cssVar('--text-3'); pl.crosshair.pos = chartState.cross;
+    pl.drawPaint.list = myDraws(); pl.drawPaint.sel = chartState.sel;
+    pl.drawPaint.up = up; pl.drawPaint.down = down; pl.drawPaint.accent = accent;
+    pl.drawPaint.upRgb = cssVar('--profit-rgb'); pl.drawPaint.downRgb = cssVar('--loss-rgb');
+    pl.drawPaint.accentRgb = cssVar('--accent-rgb') || cssVar('--profit-rgb');
+    pl.drawPaint.accentInk = cssVar('--accent-text');
+    pl.levelLines.lines = [
+      { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
+      { value: p.stopLevel, label: 'stop', color: down, dash: [5, 4] },
+      // the app-side stop is drawn apart from IG's so the two are never confused
+      ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price,
+          label: softStops()[p.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
+      { value: p.limitLevel, label: 'target', color: up, dash: [5, 4] },
+      { value: p.cur, label: 'now', color: accent, text: cssVar('--accent-text'), width: 1.5 },
+    ];
+  }
+
+  function drawPositionChart(p) {
+    const cv = hostQ('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
+    const rows = chartRows();
+    if (!rows.length) return;
+    if (!chartState.x) chartState.x = defaultWindow(rows.length, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth));
+    const win = chartState.x = clampX(chartState.x, rows.length);
+    // `charts` is a flat array here; drop any previous instance bound to this canvas first
+    for (let i = charts.length - 1; i >= 0; i--) {
+      if (charts[i].canvas === cv) { charts[i].destroy(); charts.splice(i, 1); }
+    }
+    const chart = new Chart(cv.getContext('2d'), {
+      type: 'line',
+      data: { datasets: [] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: true,
+        scales: {
+          x: xAxisConfig(win),
+          y: { position: 'right', beginAtZero: false, grid: { color: cssVar('--grid') },
+               ticks: { color: cssVar('--text-3'), font: { size: 10 }, maxTicksLimit: 7 } },
+        },
+        plugins: {
+          legend: { display: false }, tooltip: { enabled: false },
+          candlePaint: {}, drawPaint: {}, crosshair: {}, levelLines: {},
+        },
+      },
+      plugins: [candlePaint, levelLines, drawPaint, crosshair],
+    });
+    charts.push(chart);
+    syncChart(chart, p);
+    chart.update('none');
+    attachZoom(cv);
+    attachCrosshair(cv);
+    drawSubPanes(rows, win);
+  }
+
+  // Volume and RSI ride the same index axis as the candles, so they stay in step through every
+  // pan and zoom without knowing anything about them.
+  function drawSubPanes(rows, win) {
+    const kill = id => { const el = hostQ('#' + id); if (!el) return null;
       for (let i = charts.length - 1; i >= 0; i--) if (charts[i].canvas === el) { charts[i].destroy(); charts.splice(i, 1); }
       return el; };
     const vcv = kill('c-vol');
     if (vcv && rows.some(c => c.v != null)) {
-      const up = cssVar('--profit'), down = cssVar('--loss');
+      const top = Math.max(1, ...rows.map(c => c.v || 0));
       charts.push(new Chart(vcv.getContext('2d'), {
-        type: 'bar',
-        data: { labels, datasets: [{ data: rows.map(c => c.v || 0).concat(new Array(Math.max(0, labels.length - rows.length)).fill(null)),
-          backgroundColor: rows.map(c => (c.c >= c.o ? up : down) + '99'), barPercentage: 0.7, categoryPercentage: 0.9 }] },
-        options: { responsive: true, maintainAspectRatio: false, animation: false,
-          scales: { x: { display: false, min: win && win.min, max: win && win.max }, y: { position: 'right', grid: { color: cssVar('--grid') }, ticks: { color: cssVar('--text-3'), font: { size: 9 }, maxTicksLimit: 3 } } },
-          plugins: { legend: { display: false }, tooltip: { enabled: false } } },
+        type: 'line',
+        data: { datasets: [] },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+          scales: { x: { ...xAxisConfig(win, false), grid: { display: false } },
+                    y: { position: 'right', min: 0, max: top * 1.05, grid: { color: cssVar('--grid') },
+                         ticks: { color: cssVar('--text-3'), font: { size: 9 }, maxTicksLimit: 3 } } },
+          plugins: { legend: { display: false }, tooltip: { enabled: false },
+                     volPaint: { rows, up: cssVar('--profit'), down: cssVar('--loss') } } },
+        plugins: [volPaint],
       }));
     }
     const rcv = kill('c-rsi');
@@ -4088,105 +4801,31 @@ if (typeof module !== 'undefined') module.exports = AN;
       const vals = rsi(rows.map(c => c.c), 14);
       charts.push(new Chart(rcv.getContext('2d'), {
         type: 'line',
-        data: { labels, datasets: [{ data: vals.concat(new Array(Math.max(0, labels.length - vals.length)).fill(null)),
+        data: { datasets: [{ data: vals.map((v, k) => ({ x: k, y: v })).filter(pt => pt.y != null && isFinite(pt.y)),
           borderColor: '#a78bfa', borderWidth: 1.4, pointRadius: 0, tension: 0.25, fill: false, spanGaps: false }] },
-        options: { responsive: true, maintainAspectRatio: false, animation: false,
-          scales: { x: { display: false, min: win && win.min, max: win && win.max }, y: { position: 'right', min: 0, max: 100, grid: { color: cssVar('--grid') },
-            ticks: { color: cssVar('--text-3'), font: { size: 9 }, callback: v => ([30, 50, 70].includes(v) ? v : '') , stepSize: 10 } } },
+        options: { responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+          scales: { x: { ...xAxisConfig(win, false), grid: { display: false } },
+                    y: { position: 'right', min: 0, max: 100, grid: { color: cssVar('--grid') },
+                         ticks: { color: cssVar('--text-3'), font: { size: 9 }, stepSize: 10,
+                                  callback: v => ([30, 50, 70].includes(v) ? v : '') } } },
           plugins: { legend: { display: false }, tooltip: { enabled: false } } },
       }));
     }
   }
-
-  function drawPositionChart(p) {
-    const cv = $('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
-    const rows = chartRows();
-    if (!rows.length) return;
-    // Future slots: real entries with no data, so the axis can be scrolled past the last candle
-    // and still label the time. The step comes from the candles themselves.
-    const tOf = c => { const d = new Date((c.t || '').length === 19 ? c.t + 'Z' : c.t); return isFinite(d) ? d.getTime() : NaN; };
-    const stepMs = rows.length > 1 ? (tOf(rows[rows.length - 1]) - tOf(rows[0])) / (rows.length - 1) : NaN;
-    const lastMs = tOf(rows[rows.length - 1]);
-    const fmt = ms => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
-    const labels = rows.map(c => (c.t || '').slice(11, 16) || (c.t || '').slice(5, 10))
-      .concat(Array.from({ length: FUTURE_SLOTS }, (_, i) =>
-        isFinite(stepMs) && isFinite(lastMs) ? fmt(lastMs + (i + 1) * stepMs) : ''));
-    const pad = arr => arr.concat(new Array(FUTURE_SLOTS).fill(null));
-    const up = cssVar('--profit'), down = cssVar('--loss');
-    const colors = rows.map(c => (c.c >= c.o ? up : down));
-    const marks = [p.level, p.stopLevel, p.limitLevel, p.cur].filter(v => v != null && isFinite(v));
-    // Size the visible window to the canvas the first time, so a candle is legible on any screen.
-    if (!chartState.x) chartState.x = defaultWindow(rows.length, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth));
-    const win = chartState.x = clampX(chartState.x, rows.length);
-    const vis = rows.slice(win.min, win.max + 1);
-    // The price range follows what is actually on screen, so zooming into a quiet stretch fills
-    // the pane instead of leaving it flat. A level is pulled in only when it does not swamp the
-    // view — the Levels button is there to frame them deliberately.
-    let autoLo = Math.min(...vis.map(c => c.l)), autoHi = Math.max(...vis.map(c => c.h));
-    const visSpan = (autoHi - autoLo) || Math.abs(autoHi) * 0.001 || 1;
-    for (const m of marks) {
-      const lo = Math.min(autoLo, m), hi = Math.max(autoHi, m);
-      if (hi - lo <= visSpan * 1.25) { autoLo = lo; autoHi = hi; }
+  // Panning must move the sub-panes too, without rebuilding them.
+  function syncSubPanes() {
+    if (!chartState || !chartState.x) return;
+    const win = chartState.x, main = hostQ('#c-pos');
+    for (const c of charts) {
+      if (!c.canvas || c.canvas === main || !c.canvas.id.startsWith('c-') || !c.options.scales || !c.options.scales.x) continue;
+      c.options.scales.x.min = win.min; c.options.scales.x.max = win.max;
+      c.update('none');
     }
-    const autoPad = (autoHi - autoLo) * 0.12 || Math.abs(autoHi) * 0.001 || 1;
-    const yMin = chartState.y ? chartState.y.min : autoLo - autoPad;
-    const yMax = chartState.y ? chartState.y.max : autoHi + autoPad;
-    chartState.fullRange = { min: Math.min(...rows.map(c => c.l), ...marks), max: Math.max(...rows.map(c => c.h), ...marks) };
-    chartState.autoRange = { min: autoLo - autoPad, max: autoHi + autoPad };
-    // price precision varies wildly across instruments: 7800 vs 1.16082
-    const span = yMax - yMin;
-    const dp = span < 0.05 ? 5 : span < 1 ? 4 : span < 20 ? 3 : 2;
-    const ctx = cv.getContext('2d');
-    // `charts` is a flat array here; drop any previous instance bound to this canvas first
-    for (let i = charts.length - 1; i >= 0; i--) {
-      if (charts[i].canvas === cv) { charts[i].destroy(); charts.splice(i, 1); }
-    }
-    const chart = new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets: [
-        { label: 'range', data: pad(rows.map(c => [c.l, c.h])), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 3 },
-        { label: 'body', data: pad(rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)])), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 2 },
-        // moving averages ride on the same scale as the candles
-        ...INDICATORS.filter(i => i.overlay !== false && chartState.ind.has(i.k)).map(i => ({
-          type: 'line', label: i.label, data: pad(i.fn(rows)), borderColor: i.color(), borderWidth: 1.4,
-          pointRadius: 0, tension: 0.2, fill: false, spanGaps: false, order: 1,
-        })),
-      ] },
-      options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
-        scales: {
-          x: { min: win.min, max: win.max, grid: { display: true, color: cssVar('--grid'), drawTicks: false },
-               ticks: { color: cssVar('--text-3'), maxTicksLimit: 8, font: { size: 10 }, autoSkip: true } },
-          // Bar charts start at zero by default, which flattens candles into a line. Fit the
-          // range to the data AND the level lines, so entry, stop and target stay on screen.
-          y: { position: 'right', beginAtZero: false, min: yMin, max: yMax,
-               grid: { color: cssVar('--grid') },
-               ticks: { color: cssVar('--text-3'), font: { size: 10 }, maxTicksLimit: 7,
-                        callback: v => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(dp)) } },
-        },
-        plugins: {
-          legend: { display: false },
-          crosshair: { pos: chartState.cross, dp, color: cssVar('--text-3') },
-          tooltip: { callbacks: { label: c => { const r = rows[c.dataIndex];
-            return `O ${r.o}  H ${r.h}  L ${r.l}  C ${r.c}`; } } },
-          levelLines: { lines: [
-            { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
-            { value: p.stopLevel, label: 'stop', color: cssVar('--loss'), dash: [5, 4] },
-            // the app-side stop is drawn apart from IG's so the two are never confused
-            ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price,
-                label: softStops()[p.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
-            { value: p.limitLevel, label: 'target', color: cssVar('--profit'), dash: [5, 4] },
-            { value: p.cur, label: 'now', color: cssVar('--accent'), text: cssVar('--accent-text'), width: 1.5 },
-          ] },
-        },
-      },
-      plugins: [levelLines, crosshair],
-    });
-    charts.push(chart);
-    attachZoom(cv);
-    attachCrosshair(cv);
-    drawSubPanes(rows, labels, win);
   }
+  // A read-only window into the chart, so the test harness can assert on what is drawn instead of
+  // reaching into Chart.js internals that change shape whenever the rendering does.
+  window.__chart = () => chartState && ({ rows: chartRows(), x: chartState.x, y: chartState.y,
+    tool: chartState.tool || 'cursor', sel: chartState.sel, draws: myDraws() });
 
   function renderOpen() {
     const el = $('#open'); if (!el) return;
@@ -4379,7 +5018,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       renderOpen();
       // Fold the new tick into the forming bar, then repaint the canvas only — re-rendering the
       // whole panel every two seconds would throw away the pointer and the scroll position.
-      if (chartState) { const moved = tickLiveCandle(); if (moved) { redrawChart(); paintOhlc(); } else renderChartPanel(); }
+      if (chartState) { const moved = tickLiveCandle();
+        if (moved) { redrawChart(); paintOhlc(); } else if (!chartState.preview) renderChartPanel(); }
     }
     renderNav();
   }
