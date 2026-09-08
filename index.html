@@ -981,6 +981,12 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .symlink { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; border-bottom: 1px dashed var(--border-strong); }
 .symlink:hover { color: var(--accent); border-bottom-color: var(--accent); }
 #chartpanel:empty { display: none; }
+#tvpanel:empty { display: none; }
+#tvpanel { margin-top: 20px; }
+#tvpanel iframe { display: block; width: 100%; height: 460px; border: 0; background: var(--card); }
+@media (max-width: 760px) { #tvpanel iframe { height: min(60vh, 420px); } }
+#tvpanel .tv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#tvpanel .tv-head input { height: 28px; font-size: 12px; width: 190px; }
 #chartpanel { margin-top: 20px; }
 #chartpanel .cw.tall { height: 340px; }
 @media (max-width: 760px) {
@@ -1131,6 +1137,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
       <!-- OPEN POSITIONS -->
       <div class="section hidden" data-sec="open" id="open" style="display:grid;gap:20px"></div>
       <div id="chartpanel"></div>
+      <div id="tvpanel"></div>
 
       <!-- TRADES -->
       <div class="section hidden" data-sec="trades">
@@ -2310,7 +2317,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {} },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {}, tv: { on: false, symbols: {} } },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -3197,6 +3204,78 @@ if (typeof module !== 'undefined') module.exports = AN;
     { k: 'rsi', label: 'RSI 14', overlay: false },
   ];
 
+  // ---- optional TradingView panel ----
+  // This is the one thing in the app that loads someone else's code, so it is off by default and
+  // it lives in a cross-origin iframe: TradingView runs on its own origin and cannot reach the
+  // sync or close tokens this page keeps in localStorage. Its prices come from a different feed
+  // than IG's, so the two charts will not agree tick for tick.
+  const TV_INTERVAL = { SECOND: '1', MINUTE: '1', MINUTE_2: '2', MINUTE_3: '3', MINUTE_5: '5',
+    MINUTE_10: '10', MINUTE_15: '15', MINUTE_30: '30', HOUR: '60', HOUR_2: '120', HOUR_3: '180',
+    HOUR_4: '240', DAY: 'D', WEEK: 'W', MONTH: 'M' };
+  // IG's market names do not map onto TradingView symbols in general, so these are the common
+  // ones and everything else is a box for you to type into.
+  const TV_GUESS = {
+    'us 500': 'OANDA:SPX500USD', 'us tech 100': 'OANDA:NAS100USD', 'wall street': 'OANDA:US30USD',
+    'germany 40': 'OANDA:DE30EUR', 'ftse 100': 'OANDA:UK100GBP', 'japan 225': 'OANDA:JP225USD',
+    'australia 200': 'OANDA:AU200AUD', 'spot gold': 'OANDA:XAUUSD', 'spot silver': 'OANDA:XAGUSD',
+    'oil - us crude': 'TVC:USOIL', 'oil - brent crude': 'TVC:UKOIL',
+  };
+  function tvGuess(market) {
+    const raw = String(market || '').trim();
+    const key = raw.toLowerCase().replace(/\s*\(.*\)\s*$/, '').trim();
+    if (TV_GUESS[key]) return TV_GUESS[key];
+    const fx = raw.toUpperCase().match(/^([A-Z]{3})\s*\/\s*([A-Z]{3})$/);
+    if (fx) return `OANDA:${fx[1]}${fx[2]}`;
+    return '';
+  }
+  const tvCfg = () => (S.settings.tv = S.settings.tv || { on: false, symbols: {} });
+  function tvSymbolFor(p) {
+    const cfg = tvCfg(), k = p.epic || p.market || '';
+    return (cfg.symbols && cfg.symbols[k]) || tvGuess(p.market) || '';
+  }
+  function tvUrl(sym) {
+    const q = new URLSearchParams({
+      symbol: sym, interval: TV_INTERVAL[chartState.res] || '5',
+      theme: S.theme === 'light' ? 'light' : 'dark', style: '1', locale: 'en',
+      hide_side_toolbar: '1', allow_symbol_change: '1', save_image: '0', withdateranges: '1',
+    });
+    return `https://s.tradingview.com/widgetembed/?${q}`;
+  }
+  function renderTvPanel() {
+    const el = $('#tvpanel'); if (!el) return;
+    const cfg = tvCfg();
+    const p = chartState && (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (!p || !cfg.on) { el.innerHTML = ''; el.dataset.url = ''; return; }
+    const sym = tvSymbolFor(p);
+    const url = sym ? tvUrl(sym) : '';
+    // Rebuilding on every poll would reload the widget every couple of seconds, so the frame is
+    // only replaced when what it points at actually changes.
+    if (el.dataset.url === url && el.querySelector('iframe')) return;
+    el.dataset.url = url;
+    el.innerHTML = `<div class="card">
+        <div class="card-head">
+          <div class="card-title">TradingView<small>A second opinion from another feed — prices will not match IG exactly</small></div>
+          <div class="tv-head">
+            <input type="text" id="tv-sym" value="${esc(sym)}" placeholder="e.g. OANDA:SPX500USD" aria-label="TradingView symbol" spellcheck="false">
+            <button class="btn ghost sm" data-tvset>Set</button>
+            <button class="btn ghost icon sm" data-tvclose aria-label="Hide TradingView">${I.x}</button>
+          </div>
+        </div>
+        ${url ? `<iframe src="${esc(url)}" title="TradingView chart for ${esc(sym)}" loading="lazy"
+              referrerpolicy="no-referrer" allow="" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>`
+          : `<div class="card-body dim" style="font-size:12px">No TradingView symbol for <b>${esc(p.market || p.epic)}</b> yet. Type one above — the format is <code>EXCHANGE:TICKER</code>, for example <code>OANDA:SPX500USD</code>.</div>`}
+      </div>`;
+    const save = () => {
+      const v = $('#tv-sym').value.trim();
+      cfg.symbols = cfg.symbols || {};
+      if (v) cfg.symbols[p.epic || p.market || ''] = v; else delete cfg.symbols[p.epic || p.market || ''];
+      persist(); el.dataset.url = ''; renderTvPanel();
+    };
+    el.querySelector('[data-tvset]').addEventListener('click', save);
+    $('#tv-sym').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    el.querySelector('[data-tvclose]').addEventListener('click', () => { cfg.on = false; persist(); renderTvPanel(); renderChartPanel(); });
+  }
+
   // Crosshair with an OHLC readout, the thing most missed from a real charting package.
   const crosshair = {
     id: 'crosshair',
@@ -3238,6 +3317,49 @@ if (typeof module !== 'undefined') module.exports = AN;
   // session is served from memory instead of being bought again.
   const candleCache = new Map();
   const candleKey = (epic, res) => `${epic}|${res}`;
+
+  // IG only publishes a candle once its interval has closed, so the newest bar on the chart was
+  // up to one interval old and the price you were watching was not on it. The position feed
+  // already ticks every couple of seconds, so the interval in progress is built from that.
+  const RES_MS = { SECOND: 1e3, MINUTE: 6e4, MINUTE_2: 12e4, MINUTE_3: 18e4, MINUTE_5: 3e5,
+    MINUTE_10: 6e5, MINUTE_15: 9e5, MINUTE_30: 18e5, HOUR: 36e5, HOUR_2: 72e5, HOUR_3: 108e5,
+    HOUR_4: 144e5, DAY: 864e5, WEEK: 6048e5 };   // MONTH has no fixed length, so it has no live bar
+  const candleMs = c => { const t = String(c && c.t || ''); const d = new Date(t.length === 19 ? t + 'Z' : t); return d.getTime(); };
+  const isoUtc = ms => new Date(ms).toISOString().slice(0, 19);
+  // history plus the bar in progress — what the chart actually draws
+  const chartRows = () => !chartState ? [] : (chartState.candles || []).concat(chartState.live ? [chartState.live] : []);
+
+  function tickLiveCandle() {
+    if (!chartState || !(chartState.candles || []).length) return false;
+    const step = RES_MS[chartState.res];
+    if (!step) return false;
+    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (!p) return false;
+    const bid = Number(p.bid), offer = Number(p.offer);
+    const px = isFinite(bid) && isFinite(offer) ? (bid + offer) / 2 : isFinite(bid) ? bid : isFinite(offer) ? offer : NaN;
+    if (!isFinite(px)) return false;
+    const bucket = Math.floor(Date.now() / step) * step;
+    const lastMs = candleMs(chartState.candles[chartState.candles.length - 1]);
+    // once IG publishes the interval its own candle wins; ours only covers what is still open
+    if (isFinite(lastMs) && bucket <= lastMs) { if (!chartState.live) return false; chartState.live = null; return true; }
+    const live = chartState.live;
+    if (live && live.bucket === bucket) {
+      if (px > live.h) live.h = px;
+      if (px < live.l) live.l = px;
+      if (live.c === px) return false;                  // nothing moved, nothing to redraw
+      live.c = px;
+      return true;
+    }
+    // a fresh interval: open at the price the last one closed, so the series has no gap
+    const prevClose = live ? live.c : chartState.candles[chartState.candles.length - 1].c;
+    chartState.live = { bucket, t: isoUtc(bucket), o: isFinite(prevClose) ? prevClose : px,
+                        h: Math.max(px, prevClose || px), l: Math.min(px, prevClose || px), c: px, v: null, forming: true };
+    // keep up with the right edge only if the view was already pinned there
+    if (chartState.x && chartState.x.max >= chartState.candles.length - 1) {
+      chartState.x = { min: chartState.x.min + 1, max: chartState.x.max + 1 };
+    }
+    return true;
+  }
 
   // Chart.js has no candlestick type; floating bars give wicks and bodies with no extra library.
   const levelLines = {
@@ -3298,7 +3420,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const ck = candleKey(p.epic, chartState.res);
     const cached = candleCache.get(ck);
     if (cached) {                      // already bought this resolution this session
-      chartState.candles = cached.candles; chartState.allowance = cached.allowance;
+      chartState.candles = cached.candles; chartState.allowance = cached.allowance; chartState.live = null;
       chartState.cached = true; chartState.err = null; chartState.loading = false;
       renderChartPanel(); return;
     }
@@ -3308,7 +3430,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       const res = await fetch(url, { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
-      chartState.candles = data.candles || [];
+      chartState.candles = data.candles || []; chartState.live = null;
       chartState.allowance = data.allowance || null;
       chartState.cached = !!data.cached;
       chartState.err = null;
@@ -3317,7 +3439,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     chartState.loading = false;
     renderChartPanel();
   }
-  function closeChart() { chartState = null; const el = $('#chartpanel'); if (el) el.innerHTML = ''; }
+  function closeChart() {
+    chartState = null;
+    const el = $('#chartpanel'); if (el) el.innerHTML = '';
+    const tv = $('#tvpanel'); if (tv) { tv.innerHTML = ''; tv.dataset.url = ''; }
+  }
 
   function renderChartPanel() {
     const el = $('#chartpanel'); if (!el) return;
@@ -3338,6 +3464,7 @@ if (typeof module !== 'undefined') module.exports = AN;
               <button class="btn ghost sm" data-zoom="levels" title="Frame entry, stop and target">Levels</button>
               <button class="btn ghost sm" data-zoom="all" title="Every candle, full price range">All</button>
               <button class="btn ghost sm" data-zoom="fit" title="Back to the default view">Fit</button>
+              <button class="btn ghost sm ${tvCfg().on ? 'on' : ''}" data-tv title="Show a TradingView chart below. Loads TradingView in a separate frame; off by default.">TV</button>
             </span>
             <button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </div>
@@ -3349,7 +3476,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
         </div>
         <div class="ohlc" id="ohlc">${(() => {
-          const h = chartState.hover, rows = chartState.candles || [];
+          const h = chartState.hover, rows = chartRows();
           const c = h != null && rows[h] ? rows[h] : rows[rows.length - 1];
           if (!c) return '';
           const dpv = Math.abs(c.c) < 10 ? 5 : Math.abs(c.c) < 1000 ? 3 : 2;
@@ -3382,8 +3509,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       else if (k === 'fit') resetZoom();
       else { chartState.y = null; redrawChart(); }        // Levels: refit price around the levels
     }));
+    const tvBtn = el.querySelector('[data-tv]');
+    if (tvBtn) tvBtn.addEventListener('click', () => { const c = tvCfg(); c.on = !c.on; persist(); renderChartPanel(); renderTvPanel(); });
     el.querySelector('[data-chartclose]').addEventListener('click', closeChart);
     drawPositionChart(p);
+    renderTvPanel();
     if (!chartState.shown) { chartState.shown = true; el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
   }
 
@@ -3424,8 +3554,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     return { min, max: min + span };
   }
   function setX(min, max) {
-    if (!chartState || !chartState.candles || !chartState.candles.length) return false;
-    const next = clampX({ min, max }, chartState.candles.length);
+    if (!chartState || !chartRows().length) return false;
+    const next = clampX({ min, max }, chartRows().length);
     const cur = chartState.x;
     if (cur && cur.min === next.min && cur.max === next.max) return false;
     chartState.x = next;
@@ -3434,7 +3564,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function zoomX(factor, anchorIdx) {
     if (!chartState || !chartState.x || !chartState.candles) return false;
-    const n = chartState.candles.length, { min, max } = chartState.x, span = max - min;
+    const n = chartRows().length, { min, max } = chartState.x, span = max - min;
     // A gentle wheel step can round to no change at all; nudge by a bar so every notch does
     // something, and only report "nothing happened" at the actual limits.
     let nextSpan = Math.round(span * factor);
@@ -3463,7 +3593,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function resetZoom(kind) {
     if (!chartState) return;
-    const n = (chartState.candles || []).length;
+    const n = chartRows().length;
     if (kind === 'all') {                              // everything: every candle, full price range
       if (n) chartState.x = { min: 0, max: maxSpan(n) };
       if (chartState.fullRange) {
@@ -3591,7 +3721,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       chartState.cross = { x: ev.clientX - r.left, y: ev.clientY - r.top };
       const idx = chart.scales.x.getValueForPixel(chartState.cross.x);
       // clamp to real candles: the slots past the last one carry no prices to read out
-      pending = Math.max(0, Math.min((chartState.candles || []).length - 1, Math.round(idx)));
+      pending = Math.max(0, Math.min(chartRows().length - 1, Math.round(idx)));
       if (pending !== chartState.hover) { chartState.hover = pending; paintOhlc(); }
       schedule();
     };
@@ -3609,7 +3739,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   // repaint just the readout rather than the whole panel, which would kill the pointer state
   function paintOhlc() {
     const el = $('#ohlc'); if (!el || !chartState) return;
-    const rows = chartState.candles || [];
+    const rows = chartRows();
     const c = chartState.hover != null && rows[chartState.hover] ? rows[chartState.hover] : rows[rows.length - 1];
     if (!c) { el.innerHTML = ''; return; }
     const dpv = Math.abs(c.c) < 10 ? 5 : Math.abs(c.c) < 1000 ? 3 : 2;
@@ -3654,7 +3784,7 @@ if (typeof module !== 'undefined') module.exports = AN;
 
   function drawPositionChart(p) {
     const cv = $('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
-    const rows = chartState.candles;
+    const rows = chartRows();
     if (!rows.length) return;
     // Future slots: real entries with no data, so the axis can be scrolled past the last candle
     // and still label the time. The step comes from the candles themselves.
@@ -3910,7 +4040,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.posError = String(err.message || err); pollFails++;
     }
     S.posBusy = false;
-    if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
+    if (S.section === 'open') {
+      renderOpen();
+      // Fold the new tick into the forming bar, then repaint the canvas only — re-rendering the
+      // whole panel every two seconds would throw away the pointer and the scroll position.
+      if (chartState) { const moved = tickLiveCandle(); if (moved) { redrawChart(); paintOhlc(); } else renderChartPanel(); }
+    }
     renderNav();
   }
 

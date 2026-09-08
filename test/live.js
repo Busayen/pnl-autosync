@@ -34,10 +34,12 @@ function serve(dir) {
     if (p === '/candles') { calls.push({ p });
       const out = []; let px = 5000, seed = 42;
       const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648, seed / 2147483648);
-      const t0 = Date.UTC(2026, 8, 7, 8, 0, 0);
+      // end the history at the last closed five-minute boundary, so a bar is genuinely forming
+      const stepMs = 3e5;
+      const t0 = Math.floor(Date.now() / stepMs) * stepMs - 150 * stepMs;
       for (let i = 0; i < 150; i++) {
         const o = px, c = o + (rnd() - 0.47) * 14;
-        out.push({ t: new Date(t0 + i * 3e5).toISOString().slice(0, 19), o: +o.toFixed(1),
+        out.push({ t: new Date(t0 + i * stepMs).toISOString().slice(0, 19), o: +o.toFixed(1),
           h: +(Math.max(o, c) + rnd() * 6).toFixed(1), l: +(Math.min(o, c) - rnd() * 6).toFixed(1),
           c: +c.toFixed(1), v: Math.round(500 + rnd() * 4000) });
         px = c;
@@ -371,6 +373,70 @@ async function candleChart(browser, viewport, touch) {
   await page.context().close();
 }
 
+// IG only publishes a candle once its interval closes, so the bar in progress is built from the
+// position feed. And the TradingView panel is third-party code on a page holding two tokens.
+async function liveCandleAndTv(browser) {
+  const px = (bid, offer) => { state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP',
+    market: 'US 500', direction: 'BUY', size: 2, level: 5000, bid, offer, stopLevel: 4980,
+    limitLevel: 5090, contractSize: 1, currency: 'USD' }] }; };
+  px(5160, 5161);
+  const { page, errs } = await openPage(browser);
+  const external = [];
+  page.on('request', r => { if (!r.url().startsWith(`http://localhost:${PORT}`)) external.push(r.url()); });
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2400);
+  const bar = () => page.evaluate(() => {
+    const c = window.Chart && Chart.getChart(document.querySelector('#c-pos'));
+    if (!c) return null;
+    const body = c.data.datasets[1].data.filter(v => v != null);
+    return { bars: body.length, last: body[body.length - 1],
+             readout: ((document.querySelector('#ohlc') || {}).innerText || '').replace(/\n/g, ' ') };
+  });
+
+  const a = await bar();
+  check('a bar is forming past the last published candle', !!a && a.bars === 151, a && `${a.bars} bars`);
+  px(5170, 5171); await page.waitForTimeout(3200);
+  const b = await bar();
+  check('the forming bar follows price up', b.last[1] > a.last[1], `${JSON.stringify(a.last)} -> ${JSON.stringify(b.last)}`);
+  px(5140, 5141); await page.waitForTimeout(3200);
+  const c = await bar();
+  check('its high holds when price falls back', /H 5170/.test(c.readout), c.readout.slice(0, 64));
+  check('its low tracks the fall', /L 5140/.test(c.readout), c.readout.slice(0, 64));
+  check('no extra bar is appended per tick', c.bars === 151, `${c.bars} bars`);
+
+  check('nothing third-party loads before opting in', external.length === 0, external.slice(0, 2).join(' '));
+  check('the TradingView panel is empty by default',
+    await page.evaluate(() => document.querySelector('#tvpanel').innerHTML === ''));
+  await page.evaluate(() => document.querySelector('[data-tv]')?.click());
+  await page.waitForTimeout(900);
+  const f = await page.evaluate(() => { const i = document.querySelector('#tvpanel iframe');
+    return i ? { src: i.getAttribute('src'), sandbox: i.getAttribute('sandbox') } : null; });
+  check('it renders a TradingView frame', !!f && /tradingview\.com/.test(f.src), f && f.src);
+  check('the frame is sandboxed', !!f && /allow-scripts/.test(f.sandbox || ''), f && f.sandbox);
+  check('the symbol is guessed from the market',
+    (await page.evaluate(() => document.querySelector('#tv-sym')?.value)) === 'OANDA:SPX500USD');
+  const src1 = f && f.src;
+  await page.waitForTimeout(4500);
+  check('the frame survives a poll without reloading',
+    (await page.evaluate(() => document.querySelector('#tvpanel iframe')?.getAttribute('src'))) === src1);
+  await page.fill('#tv-sym', 'NASDAQ:AAPL');
+  await page.evaluate(() => document.querySelector('[data-tvset]')?.click());
+  await page.waitForTimeout(800);
+  check('a typed symbol is used and remembered',
+    /NASDAQ%3AAAPL/.test(await page.evaluate(() => document.querySelector('#tvpanel iframe')?.getAttribute('src')) || '')
+    && !!(await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).settings.tv.symbols['IX.D.SPTRD.IFE.IP'])));
+  await page.evaluate(() => document.querySelector('[data-res="HOUR"]')?.click());
+  await page.waitForTimeout(1600);
+  check('the frame follows the chart timeframe',
+    /interval=60/.test(await page.evaluate(() => document.querySelector('#tvpanel iframe')?.getAttribute('src')) || ''));
+  await page.evaluate(() => document.querySelector('[data-chartclose]')?.click());
+  await page.waitForTimeout(600);
+  check('closing the chart clears the frame',
+    await page.evaluate(() => document.querySelector('#tvpanel').innerHTML === ''));
+  check('no page errors through the live bar and TV panel', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -382,7 +448,8 @@ async function candleChart(browser, viewport, touch) {
       ['bad worker data', badData], ['closing a position', closing],
       ['foreign currency', foreignCurrency], ['IG reference rates', igReferenceRates],
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
-      ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)]]) {
+      ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
+      ['live bar + TradingView', liveCandleAndTv]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }

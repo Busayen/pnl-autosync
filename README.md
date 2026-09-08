@@ -260,8 +260,14 @@ Settings → **IG sync worker URL** (no trailing `/sync`), **Sync token**, **Syn
 ## Privacy and security
 
 - Everything runs client-side. Trades live in `localStorage` and are never uploaded.
-- The page makes **no external requests**. Chart.js and html2canvas are inlined rather than pulled
-  from a CDN, partly so that nothing third-party executes on a page that may hold a sync token.
+- The page makes **no external requests** by default. Chart.js and html2canvas are inlined rather
+  than pulled from a CDN, partly so that nothing third-party executes on a page that may hold a
+  sync token.
+- The one exception is opt-in: the **TV** button on a position chart embeds TradingView. It is off
+  until you press it, and it loads in a cross-origin `<iframe>` — TradingView runs on its own
+  origin and cannot read the sync or close token this page keeps in `localStorage`. Its prices come
+  from a different feed than IG's, so the two charts will not agree tick for tick. Leave it off if
+  you would rather the page stay entirely self-contained.
 - `localStorage` is scoped to the **origin**, not the path. Anything else you host under the same
   domain can read this data. Do not host untrusted code there.
 - **Never commit** your exports, `ledger-backup-*.json`, or a read-only snapshot — those contain
