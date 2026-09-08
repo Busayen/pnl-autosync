@@ -176,7 +176,10 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
 .day.l { background: var(--loss-soft); border-color: rgb(var(--loss-rgb) / 0.25); }
 .day .d { font-size: 11px; font-weight: 500; color: var(--text-3); }
 .day.p .d, .day.l .d { color: var(--text-2); }
-.day .vs { display: none; font-size: 11px; font-weight: 700; letter-spacing: -0.02em; }
+.day .vs { display: none; font-size: 11px; font-weight: 700; letter-spacing: -0.02em;
+  /* .v already truncates; .vs is what narrow screens show, so it needs the same guard or
+     the compact figure spills out of the cell at 320px. */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .day .v { display: block; font-size: 13px; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .day .c { display: block; font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
 .wk {
@@ -826,7 +829,9 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   .wk .ns { font-size: 10px; }
 }
 @media (max-width: 365px) {
-  .day .vs { font-size: 9px; }
+  /* a signed compact figure is 34px at 9px and the cell is 32px, so it lost its last
+     character; tightening the tracking is enough to keep the whole number readable */
+  .day .vs { font-size: 8.5px; letter-spacing: -0.045em; }
   .day .c { font-size: 7.5px; }
   .day .dots { display: none !important; }
   .wk .ns { font-size: 8.5px; }
@@ -978,11 +983,21 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 #chartpanel:empty { display: none; }
 #chartpanel { margin-top: 20px; }
 #chartpanel .cw.tall { height: 340px; }
-@media (max-width: 760px) { #chartpanel .cw.tall { height: 240px; } #chartpanel .tbl-tools { width: 100%; } }
+@media (max-width: 760px) {
+  #chartpanel .cw.tall { height: min(46vh, 320px); }
+  #chartpanel .tbl-tools { width: 100%; }
+  /* the stat row and the allowance note pushed the plot off the first screenful */
+  #chartcard .stat-row { padding: 8px 12px 2px !important; gap: 10px 14px; }
+  #chartcard .stat-row b { font-size: 15px; }
+  #chartpanel .chart-hint { padding: 0 12px 8px; font-size: 10px; }
+}
 
 .zoomctl { display: inline-flex; gap: 4px; align-items: center; }
 .zoomctl .btn.icon { font-size: 15px; font-weight: 600; line-height: 1; }
-#chartpanel canvas { cursor: grab; touch-action: none; }
+#chartpanel canvas { cursor: grab; touch-action: pan-y; }
+#chartpanel canvas:active { cursor: grabbing; }
+/* the chart is the point of this panel, so give it the room on a phone */
+#chartpanel .chart-hint { font-size: 10.5px; color: var(--text-3); padding: 0 16px 10px; }
 #chartpanel canvas:active { cursor: grabbing; }
 
 .indctl { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
@@ -1451,6 +1466,9 @@ const CORE = (() => {
         date,
         time: normTime(get(r, 'time')) || timeFromTs(closeTs),
         instrument: cleanInstrument(get(r, 'instrument')) || (kind === 'cost' ? cleanInstrument(get(r, 'summary')) : ''),
+        // IG writes the conversion rate into the market name and cleanInstrument() strips it.
+        // Keeping the original is what lets the FX settings show the rate IG actually used.
+        rawInstrument: (() => { const raw = String(get(r, 'instrument') || '').trim(); return /converted at/i.test(raw) ? raw : undefined; })(),
         direction,
         size: isNaN(sizeNum) ? '' : String(Math.abs(sizeNum)),
         currency: String(get(r, 'currency') || '').trim().toUpperCase(),
@@ -1531,6 +1549,7 @@ const CORE = (() => {
         date,
         time: timeFromTs(r.dateUtc) || normTime(r.time),
         instrument: cleanInstrument(name) || (kind === 'cash' ? (pnl >= 0 ? 'Deposit' : 'Withdrawal') : ''),
+        rawInstrument: /converted at/i.test(String(name || '')) ? String(name).trim() : undefined,
         direction: kind === 'trade' && !isNaN(sizeNum) && sizeNum !== 0 ? (sizeNum > 0 ? 'BUY' : 'SELL') : '',
         size: isNaN(sizeNum) ? '' : String(Math.abs(sizeNum)),
         currency: normCcy(r.currency),
@@ -2588,7 +2607,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const out = new Map();
     for (const t of S.trades) {
       const m = String(t.rawInstrument || t.instrument || '').match(/converted at ([\d.]+)/i);
-      if (m) out.set(t.instrument, parseFloat(m[1]));
+      if (m) out.set(t.instrument || String(t.rawInstrument).trim(), parseFloat(m[1]));
     }
     return out;
   }
@@ -3314,10 +3333,11 @@ if (typeof module !== 'undefined') module.exports = AN;
             <span class="select sm"><select id="res-more" aria-label="Timeframe">${RES_CHOICES.map(([k, l]) => `<option value="${k}" ${chartState.res === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>
             <span class="indctl">${INDICATORS.map(i => `<button class="tab ${chartState.ind.has(i.k) ? 'active' : ''}" data-ind="${i.k}">${i.label}</button>`).join('')}</span>
             <span class="zoomctl">
-              <button class="btn ghost icon sm" data-zoom="out" aria-label="Zoom out" title="Zoom out">−</button>
-              <button class="btn ghost icon sm" data-zoom="in" aria-label="Zoom in" title="Zoom in">+</button>
+              <button class="btn ghost icon sm" data-zoom="out" aria-label="Show more candles" title="Show more candles">−</button>
+              <button class="btn ghost icon sm" data-zoom="in" aria-label="Show fewer candles" title="Show fewer candles">+</button>
               <button class="btn ghost sm" data-zoom="levels" title="Frame entry, stop and target">Levels</button>
-              <button class="btn ghost sm" data-zoom="all" title="Show every candle">All</button>
+              <button class="btn ghost sm" data-zoom="all" title="Every candle, full price range">All</button>
+              <button class="btn ghost sm" data-zoom="fit" title="Back to the default view">Fit</button>
             </span>
             <button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </div>
@@ -3342,11 +3362,14 @@ if (typeof module !== 'undefined') module.exports = AN;
           : `<div class="cw tall" style="padding:0 10px 2px"><canvas id="c-pos"></canvas></div>
              ${chartState.ind.has('vol') ? '<div class="cw sub" style="padding:0 10px 2px"><canvas id="c-vol"></canvas></div>' : ''}
              ${chartState.ind.has('rsi') ? '<div class="cw sub" style="padding:0 10px 6px"><canvas id="c-rsi"></canvas></div>' : ''}`}
-        <div class="dim" style="font-size:11px;padding:0 16px 12px">${chartState.loading ? 'Loading candles…' : ''}${a ? `IG historical allowance: ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left this week. Each timeframe costs 150 points once per session, then comes from cache. The price line updates from the position feed and costs nothing.` : ''}</div>
+        <div class="chart-hint">${chartState.loading ? 'Loading candles…' : (matchMedia('(hover: hover)').matches
+            ? 'Scroll to zoom time · scroll over the price scale to zoom price · drag to pan'
+            : 'Drag to pan · pinch to zoom · tap a candle for its values')}</div>
+        <details class="chart-hint" style="padding-bottom:12px"${a ? '' : ' hidden'}><summary style="cursor:pointer">IG data allowance${a ? ` · ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left` : ''}</summary><div class="dim" style="padding-top:6px">Each timeframe costs 150 points once per session, then comes from cache. The price line updates from the position feed and costs nothing.</div></details>
       </div>`;
-    el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; chartState.y = null; loadCandles(); }));
+    el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; chartState.y = null; chartState.x = null; loadCandles(); }));
     const more = el.querySelector('#res-more');
-    if (more) more.addEventListener('change', () => { chartState.res = more.value; chartState.y = null; loadCandles(); });
+    if (more) more.addEventListener('change', () => { chartState.res = more.value; chartState.y = null; chartState.x = null; loadCandles(); });
     el.querySelectorAll('[data-ind]').forEach(b => b.addEventListener('click', () => {
       const k = b.dataset.ind;
       chartState.ind.has(k) ? chartState.ind.delete(k) : chartState.ind.add(k);
@@ -3354,7 +3377,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     }));
     el.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => {
       const k = b.dataset.zoom;
-      if (k === 'in') zoomBy(0.75); else if (k === 'out') zoomBy(1.33); else resetZoom(k === 'all' ? 'all' : null);
+      if (k === 'in') zoomX(0.7); else if (k === 'out') zoomX(1.43);
+      else if (k === 'all') resetZoom('all');
+      else if (k === 'fit') resetZoom();
+      else { chartState.y = null; redrawChart(); }        // Levels: refit price around the levels
     }));
     el.querySelector('[data-chartclose]').addEventListener('click', closeChart);
     drawPositionChart(p);
@@ -3362,97 +3388,222 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
 
 
-  // Zoom and pan without a plugin: adjust the y range and redraw. Wheel and pinch scale about
-  // the pointer so the price under your finger stays put; drag moves the window.
+  // Zoom and pan without a plugin: adjust the window and redraw.
+  //
+  // Time is the axis a candle chart is read along, and it used to be fixed: every screen got all
+  // 150 bars, so a phone drew a 1.2px body and a 0.3px wick — a smear, not a chart. The window is
+  // now sized so a candle is about the same width everywhere, and wheel / drag / pinch move it.
   const Y_SPAN_MIN = 1e-6;
-  function setY(min, max) {
-    if (!chartState || !isFinite(min) || !isFinite(max) || max - min < Y_SPAN_MIN) return;
-    chartState.y = { min, max };
+  const CANDLE_PX = 11;        // target width of one candle slot, so bodies land near 6px
+  const MIN_BARS = 8;
+  // Chart.js clamps a category axis to its labels, so scrolling past the last candle needs real
+  // empty slots to scroll into. They also give the axis its future timestamps.
+  const FUTURE_SLOTS = 40;
+  const MIN_REAL_ON_SCREEN = 3;   // never scroll so far that the price itself leaves the screen
+  const RIGHT_GAP = 0.06;         // a little air after the last candle, the way a trading chart sits
+  const maxSpan = n => n - 1 + Math.round(n * RIGHT_GAP);
+  const liveChart = cv => (window.Chart && Chart.getChart(cv)) || null;
+  const redrawChart = () => {
+    if (!chartState) return;
     const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
     if (p) drawPositionChart(p);
+  };
+  function defaultWindow(n, widthPx) {
+    const fit = Math.round((widthPx || 600) / CANDLE_PX);
+    const count = Math.max(MIN_BARS, Math.min(n, fit || n));
+    return { min: Math.max(0, n - count), max: n - 1 + Math.round(count * RIGHT_GAP) };
+  }
+  function clampX(win, n) {
+    const span = Math.max(MIN_BARS - 1, Math.min(maxSpan(n), Math.round(win.max - win.min)));
+    let min = Math.round(win.min);
+    // The right edge may sit past the last candle; a few candles must stay on screen.
+    const maxMin = Math.max(0, n - MIN_REAL_ON_SCREEN);
+    if (min > maxMin) min = maxMin;
+    if (min + span > n - 1 + FUTURE_SLOTS) min = n - 1 + FUTURE_SLOTS - span;
+    if (min < 0) min = 0;
+    return { min, max: min + span };
+  }
+  function setX(min, max) {
+    if (!chartState || !chartState.candles || !chartState.candles.length) return false;
+    const next = clampX({ min, max }, chartState.candles.length);
+    const cur = chartState.x;
+    if (cur && cur.min === next.min && cur.max === next.max) return false;
+    chartState.x = next;
+    redrawChart();
+    return true;
+  }
+  function zoomX(factor, anchorIdx) {
+    if (!chartState || !chartState.x || !chartState.candles) return false;
+    const n = chartState.candles.length, { min, max } = chartState.x, span = max - min;
+    // A gentle wheel step can round to no change at all; nudge by a bar so every notch does
+    // something, and only report "nothing happened" at the actual limits.
+    let nextSpan = Math.round(span * factor);
+    if (nextSpan === span) nextSpan = factor > 1 ? span + 1 : span - 1;
+    nextSpan = Math.max(MIN_BARS - 1, Math.min(maxSpan(n), nextSpan));
+    if (nextSpan === span) return false;
+    const a = anchorIdx == null ? (min + max) / 2 : Math.max(min, Math.min(max, anchorIdx));
+    const frac = span > 0 ? (a - min) / span : 0.5;
+    const lo = a - frac * nextSpan;
+    return setX(lo, lo + nextSpan);
+  }
+  const panX = bars => (!chartState || !chartState.x || !Math.round(bars)) ? false
+    : setX(chartState.x.min + Math.round(bars), chartState.x.max + Math.round(bars));
+  function setY(min, max) {
+    if (!chartState || !isFinite(min) || !isFinite(max) || max - min < Y_SPAN_MIN) return false;
+    chartState.y = { min, max };
+    redrawChart();
+    return true;
   }
   function zoomBy(factor, anchor) {
-    if (!chartState) return;
+    if (!chartState) return false;
     const cur = chartState.y || chartState.autoRange;
-    if (!cur) return;
+    if (!cur) return false;
     const a = anchor == null ? (cur.min + cur.max) / 2 : anchor;
-    setY(a - (a - cur.min) * factor, a + (cur.max - a) * factor);
+    return setY(a - (a - cur.min) * factor, a + (cur.max - a) * factor);
   }
   function resetZoom(kind) {
     if (!chartState) return;
-    if (kind === 'all' && chartState.fullRange) {
-      const r = chartState.fullRange, pad = (r.max - r.min) * 0.06 || 1;
-      chartState.y = { min: r.min - pad, max: r.max + pad };
-    } else chartState.y = null;                      // back to the levels-focused default
-    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
-    if (p) drawPositionChart(p);
+    const n = (chartState.candles || []).length;
+    if (kind === 'all') {                              // everything: every candle, full price range
+      if (n) chartState.x = { min: 0, max: maxSpan(n) };
+      if (chartState.fullRange) {
+        const r = chartState.fullRange, pad = (r.max - r.min) * 0.06 || 1;
+        chartState.y = { min: r.min - pad, max: r.max + pad };
+      } else chartState.y = null;
+    } else {                                           // back to the readable default on both axes
+      chartState.y = null;
+      const cv = $('#c-pos');
+      if (n) chartState.x = defaultWindow(n, cv ? cv.clientWidth : 0);
+    }
+    redrawChart();
   }
-  function attachZoom(cv, chart) {
+  function attachZoom(cv) {
     if (cv.dataset.zoomed) return;
     cv.dataset.zoomed = '1';
-    const priceAt = ev => {
+    // Look the chart up on each event: drawPositionChart destroys and rebuilds it on every poll,
+    // so a captured instance goes stale and reports the scales from a previous frame.
+    const at = ev => {
+      const chart = liveChart(cv); if (!chart) return null;
       const r = cv.getBoundingClientRect();
-      const y = chart.scales.y;
-      const py = ev.clientY - r.top;
-      if (py < y.top || py > y.bottom) return null;
-      return y.getValueForPixel(py);
+      const px = ev.clientX - r.left, py = ev.clientY - r.top;
+      const { x, y } = chart.scales, a = chart.chartArea;
+      return { idx: x.getValueForPixel(px), price: (py >= y.top && py <= y.bottom) ? y.getValueForPixel(py) : null,
+               plotW: Math.max(1, x.right - x.left), plotH: Math.max(1, y.bottom - y.top),
+               // right of the plot is the price scale, below it the time scale
+               onPriceAxis: !!a && px > a.right, onTimeAxis: !!a && py > a.bottom };
     };
     cv.addEventListener('wheel', ev => {
       if (!chartState) return;
-      ev.preventDefault();
-      zoomBy(ev.deltaY > 0 ? 1.15 : 0.87, priceAt(ev));
+      const pos = at(ev); if (!pos) return;
+      // Shift is the usual modifier for the cross axis; plain wheel scales time.
+      // Scale the step by how hard the wheel was turned, so a trackpad nudge is a nudge. A full
+      // mouse notch is ~10% rather than the ~20% that made the chart jump away from you.
+      const mag = Math.min(150, Math.abs(ev.deltaY) || 100) / 150;
+      const factor = ev.deltaY > 0 ? 1 + 0.10 * mag : 1 / (1 + 0.10 * mag);
+      // Over the price scale the wheel stretches price; anywhere else it stretches time. Shift
+      // still forces price, for anyone who would rather not travel to the axis.
+      const changed = (pos.onPriceAxis || ev.shiftKey)
+        ? zoomBy(factor, pos.onPriceAxis ? null : pos.price)
+        : zoomX(factor, pos.idx);
+      // Only swallow the gesture when it did something. At the extremes the page scrolls on,
+      // instead of the chart silently eating every scroll that crosses it.
+      if (changed) ev.preventDefault();
     }, { passive: false });
 
     let drag = null;
     const pts = new Map();
     cv.addEventListener('pointerdown', ev => {
+      if (!chartState) return;
       pts.set(ev.pointerId, ev);
-      cv.setPointerCapture(ev.pointerId);
-      if (pts.size === 1) drag = { y: ev.clientY, range: { ...(chartState.y || chartState.autoRange) } };
-      if (pts.size === 2) { drag = null; const [a, b] = [...pts.values()];
-        chartState._pinch = { dist: Math.abs(a.clientY - b.clientY) || 1, range: { ...(chartState.y || chartState.autoRange) } }; }
+      if (pts.size === 1) {
+        const pos = at(ev);
+        drag = { x: ev.clientX, y: ev.clientY, win: { ...chartState.x }, range: { ...(chartState.y || chartState.autoRange || {}) },
+                 barsPerPx: pos ? (chartState.x.max - chartState.x.min + 1) / pos.plotW : 0, plotH: pos ? pos.plotH : 1 };
+        try { cv.setPointerCapture(ev.pointerId); } catch { /* capture is a nicety, not required to pan */ }
+        cv.style.cursor = 'grabbing';
+      }
+      if (pts.size === 2) {
+        drag = null;
+        const [a, b] = [...pts.values()];
+        chartState._pinch = { dx: Math.abs(a.clientX - b.clientX) || 1, dy: Math.abs(a.clientY - b.clientY) || 1,
+                              win: { ...chartState.x }, range: { ...(chartState.y || chartState.autoRange || {}) } };
+      }
     });
     cv.addEventListener('pointermove', ev => {
       if (!pts.has(ev.pointerId) || !chartState) return;
       pts.set(ev.pointerId, ev);
-      if (pts.size === 2 && chartState._pinch) {
+      const pin = chartState._pinch;
+      if (pts.size === 2 && pin) {
         const [a, b] = [...pts.values()];
-        const dist = Math.abs(a.clientY - b.clientY) || 1;
-        const f = chartState._pinch.dist / dist;
-        const r = chartState._pinch.range, mid = (r.min + r.max) / 2, half = (r.max - r.min) / 2 * f;
-        setY(mid - half, mid + half);
+        // Each axis follows the spread along that axis, so one gesture can widen time and price.
+        const dx = Math.abs(a.clientX - b.clientX) || 1, dy = Math.abs(a.clientY - b.clientY) || 1;
+        const span = pin.win.max - pin.win.min;
+        // Damped: the raw distance ratio made a small finger movement swing the whole window.
+        setX(pin.win.min, pin.win.min + span * Math.pow(pin.dx / dx, 0.65));
+        if (isFinite(pin.range.min) && Math.abs(dy / pin.dy - 1) > 0.05) {
+          const mid = (pin.range.min + pin.range.max) / 2, half = (pin.range.max - pin.range.min) / 2 * Math.pow(pin.dy / dy, 0.65);
+          setY(mid - half, mid + half);
+        }
         return;
       }
       if (drag && pts.size === 1) {
-        const y = chart.scales.y;
-        const perPx = (drag.range.max - drag.range.min) / Math.max(1, y.bottom - y.top);
-        const shift = (ev.clientY - drag.y) * perPx;     // drag down moves the window up
-        setY(drag.range.min + shift, drag.range.max + shift);
+        panX(-(ev.clientX - drag.x) * drag.barsPerPx + (drag.win.min - chartState.x.min));
+        if (isFinite(drag.range.min)) {
+          const perPx = (drag.range.max - drag.range.min) / drag.plotH;
+          const shift = (ev.clientY - drag.y) * perPx;      // drag down moves the window up
+          setY(drag.range.min + shift, drag.range.max + shift);
+        }
       }
     });
-    const end = ev => { pts.delete(ev.pointerId); if (pts.size < 2) chartState && (chartState._pinch = null); if (!pts.size) drag = null; };
+    const end = ev => {
+      pts.delete(ev.pointerId);
+      if (pts.size < 2 && chartState) chartState._pinch = null;
+      if (!pts.size) { drag = null; cv.style.cursor = ''; }
+    };
     cv.addEventListener('pointerup', end);
     cv.addEventListener('pointercancel', end);
     cv.addEventListener('dblclick', () => resetZoom());
+    cv.addEventListener('pointermove', ev => {
+      if (drag || pts.size) return;
+      const pos = at(ev);
+      cv.style.cursor = pos && pos.onPriceAxis ? 'ns-resize' : pos && pos.onTimeAxis ? 'ew-resize' : 'grab';
+    });
   }
 
 
-  function attachCrosshair(cv, chart, dp) {
-    const move = ev => {
-      const r = cv.getBoundingClientRect();
-      const x = ev.clientX - r.left, y = ev.clientY - r.top;
-      chartState.cross = { x, y };
-      // nearest candle by x, so the readout follows the pointer
-      const idx = chart.scales.x.getValueForPixel(x);
-      const i = Math.max(0, Math.min((chartState.candles || []).length - 1, Math.round(idx)));
-      if (i !== chartState.hover) { chartState.hover = i; paintOhlc(); }
+  function attachCrosshair(cv) {
+    if (cv.dataset.crossed) return;
+    cv.dataset.crossed = '1';
+    // chart.update() on every pointermove repaints the whole canvas; coalesce to one per frame.
+    let pending = null, raf = 0;
+    const flush = () => {
+      raf = 0;
+      const chart = liveChart(cv); if (!chart || !chartState) return;
       chart.options.plugins.crosshair.pos = chartState.cross;
       chart.update('none');
+      if (pending != null && pending !== chartState.hover) { chartState.hover = pending; paintOhlc(); }
+      pending = null;
+    };
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(flush); };
+    const move = ev => {
+      const chart = liveChart(cv); if (!chart || !chartState) return;
+      const r = cv.getBoundingClientRect();
+      chartState.cross = { x: ev.clientX - r.left, y: ev.clientY - r.top };
+      const idx = chart.scales.x.getValueForPixel(chartState.cross.x);
+      // clamp to real candles: the slots past the last one carry no prices to read out
+      pending = Math.max(0, Math.min((chartState.candles || []).length - 1, Math.round(idx)));
+      if (pending !== chartState.hover) { chartState.hover = pending; paintOhlc(); }
+      schedule();
     };
     cv.addEventListener('pointermove', move);
+    // A finger has no hover, so a tap has to place the readout explicitly.
+    cv.addEventListener('pointerdown', ev => { if (ev.pointerType !== 'mouse') move(ev); });
     cv.addEventListener('pointerleave', () => {
+      if (!chartState) return;
       chartState.cross = null; chartState.hover = null;
-      chart.options.plugins.crosshair.pos = null; chart.update('none'); paintOhlc();
+      const chart = liveChart(cv);
+      if (chart) { chart.options.plugins.crosshair.pos = null; chart.update('none'); }
+      paintOhlc();
     });
   }
   // repaint just the readout rather than the whole panel, which would kill the pointer state
@@ -3465,10 +3616,12 @@ if (typeof module !== 'undefined') module.exports = AN;
     const dir = c.c >= c.o ? 'profit' : 'loss';
     el.innerHTML = `<span class="t">${esc((c.t || '').replace('T', ' ').slice(0, 16))}</span>`
       + ['O', 'H', 'L', 'C'].map((k, i) => `<span><i>${k}</i> <b class="${dir}">${[c.o, c.h, c.l, c.c][i].toFixed(dpv)}</b></span>`).join('')
-      + (c.v != null ? `<span><i>V</i> <b>${c.v}</b></span>` : '');
+      + (c.v != null ? `<span><i>V</i> <b>${c.v}</b></span>` : '')
+      + (() => { const d = c.c - c.o; if (!isFinite(d) || !c.o) return '';
+          return `<span class="${d >= 0 ? 'profit' : 'loss'}">${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(dpv)} (${d >= 0 ? '+' : '−'}${Math.abs(d / c.o * 100).toFixed(2)}%)</span>`; })();
   }
 
-  function drawSubPanes(rows, labels) {
+  function drawSubPanes(rows, labels, win) {
     const kill = id => { const el = document.getElementById(id); if (!el) return null;
       for (let i = charts.length - 1; i >= 0; i--) if (charts[i].canvas === el) { charts[i].destroy(); charts.splice(i, 1); }
       return el; };
@@ -3477,9 +3630,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       const up = cssVar('--profit'), down = cssVar('--loss');
       charts.push(new Chart(vcv.getContext('2d'), {
         type: 'bar',
-        data: { labels, datasets: [{ data: rows.map(c => c.v || 0), backgroundColor: rows.map(c => (c.c >= c.o ? up : down) + '99'), barPercentage: 0.7, categoryPercentage: 0.9 }] },
+        data: { labels, datasets: [{ data: rows.map(c => c.v || 0).concat(new Array(Math.max(0, labels.length - rows.length)).fill(null)),
+          backgroundColor: rows.map(c => (c.c >= c.o ? up : down) + '99'), barPercentage: 0.7, categoryPercentage: 0.9 }] },
         options: { responsive: true, maintainAspectRatio: false, animation: false,
-          scales: { x: { display: false }, y: { position: 'right', grid: { color: cssVar('--grid') }, ticks: { color: cssVar('--text-3'), font: { size: 9 }, maxTicksLimit: 3 } } },
+          scales: { x: { display: false, min: win && win.min, max: win && win.max }, y: { position: 'right', grid: { color: cssVar('--grid') }, ticks: { color: cssVar('--text-3'), font: { size: 9 }, maxTicksLimit: 3 } } },
           plugins: { legend: { display: false }, tooltip: { enabled: false } } },
       }));
     }
@@ -3488,9 +3642,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       const vals = rsi(rows.map(c => c.c), 14);
       charts.push(new Chart(rcv.getContext('2d'), {
         type: 'line',
-        data: { labels, datasets: [{ data: vals, borderColor: '#a78bfa', borderWidth: 1.4, pointRadius: 0, tension: 0.25, fill: false, spanGaps: false }] },
+        data: { labels, datasets: [{ data: vals.concat(new Array(Math.max(0, labels.length - vals.length)).fill(null)),
+          borderColor: '#a78bfa', borderWidth: 1.4, pointRadius: 0, tension: 0.25, fill: false, spanGaps: false }] },
         options: { responsive: true, maintainAspectRatio: false, animation: false,
-          scales: { x: { display: false }, y: { position: 'right', min: 0, max: 100, grid: { color: cssVar('--grid') },
+          scales: { x: { display: false, min: win && win.min, max: win && win.max }, y: { position: 'right', min: 0, max: 100, grid: { color: cssVar('--grid') },
             ticks: { color: cssVar('--text-3'), font: { size: 9 }, callback: v => ([30, 50, 70].includes(v) ? v : '') , stepSize: 10 } } },
           plugins: { legend: { display: false }, tooltip: { enabled: false } } },
       }));
@@ -3501,15 +3656,32 @@ if (typeof module !== 'undefined') module.exports = AN;
     const cv = $('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
     const rows = chartState.candles;
     if (!rows.length) return;
-    const labels = rows.map(c => (c.t || '').slice(11, 16) || (c.t || '').slice(5, 10));
+    // Future slots: real entries with no data, so the axis can be scrolled past the last candle
+    // and still label the time. The step comes from the candles themselves.
+    const tOf = c => { const d = new Date((c.t || '').length === 19 ? c.t + 'Z' : c.t); return isFinite(d) ? d.getTime() : NaN; };
+    const stepMs = rows.length > 1 ? (tOf(rows[rows.length - 1]) - tOf(rows[0])) / (rows.length - 1) : NaN;
+    const lastMs = tOf(rows[rows.length - 1]);
+    const fmt = ms => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`; };
+    const labels = rows.map(c => (c.t || '').slice(11, 16) || (c.t || '').slice(5, 10))
+      .concat(Array.from({ length: FUTURE_SLOTS }, (_, i) =>
+        isFinite(stepMs) && isFinite(lastMs) ? fmt(lastMs + (i + 1) * stepMs) : ''));
+    const pad = arr => arr.concat(new Array(FUTURE_SLOTS).fill(null));
     const up = cssVar('--profit'), down = cssVar('--loss');
     const colors = rows.map(c => (c.c >= c.o ? up : down));
     const marks = [p.level, p.stopLevel, p.limitLevel, p.cur].filter(v => v != null && isFinite(v));
-    // Framing the whole 150-candle range squashes entry, stop and target into a sliver. Default
-    // to the band that actually matters — the levels plus recent price — and let zoom widen it.
-    const recent = rows.slice(-40);
-    const autoLo = Math.min(...recent.map(c => c.l), ...marks);
-    const autoHi = Math.max(...recent.map(c => c.h), ...marks);
+    // Size the visible window to the canvas the first time, so a candle is legible on any screen.
+    if (!chartState.x) chartState.x = defaultWindow(rows.length, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth));
+    const win = chartState.x = clampX(chartState.x, rows.length);
+    const vis = rows.slice(win.min, win.max + 1);
+    // The price range follows what is actually on screen, so zooming into a quiet stretch fills
+    // the pane instead of leaving it flat. A level is pulled in only when it does not swamp the
+    // view — the Levels button is there to frame them deliberately.
+    let autoLo = Math.min(...vis.map(c => c.l)), autoHi = Math.max(...vis.map(c => c.h));
+    const visSpan = (autoHi - autoLo) || Math.abs(autoHi) * 0.001 || 1;
+    for (const m of marks) {
+      const lo = Math.min(autoLo, m), hi = Math.max(autoHi, m);
+      if (hi - lo <= visSpan * 1.25) { autoLo = lo; autoHi = hi; }
+    }
     const autoPad = (autoHi - autoLo) * 0.12 || Math.abs(autoHi) * 0.001 || 1;
     const yMin = chartState.y ? chartState.y.min : autoLo - autoPad;
     const yMax = chartState.y ? chartState.y.max : autoHi + autoPad;
@@ -3526,18 +3698,19 @@ if (typeof module !== 'undefined') module.exports = AN;
     const chart = new Chart(ctx, {
       type: 'bar',
       data: { labels, datasets: [
-        { label: 'range', data: rows.map(c => [c.l, c.h]), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 3 },
-        { label: 'body', data: rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)]), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 2 },
+        { label: 'range', data: pad(rows.map(c => [c.l, c.h])), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 3 },
+        { label: 'body', data: pad(rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)])), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 2 },
         // moving averages ride on the same scale as the candles
         ...INDICATORS.filter(i => i.overlay !== false && chartState.ind.has(i.k)).map(i => ({
-          type: 'line', label: i.label, data: i.fn(rows), borderColor: i.color(), borderWidth: 1.4,
+          type: 'line', label: i.label, data: pad(i.fn(rows)), borderColor: i.color(), borderWidth: 1.4,
           pointRadius: 0, tension: 0.2, fill: false, spanGaps: false, order: 1,
         })),
       ] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         scales: {
-          x: { grid: { display: false }, ticks: { color: cssVar('--text-3'), maxTicksLimit: 8, font: { size: 10 } } },
+          x: { min: win.min, max: win.max, grid: { display: true, color: cssVar('--grid'), drawTicks: false },
+               ticks: { color: cssVar('--text-3'), maxTicksLimit: 8, font: { size: 10 }, autoSkip: true } },
           // Bar charts start at zero by default, which flattens candles into a line. Fit the
           // range to the data AND the level lines, so entry, stop and target stay on screen.
           y: { position: 'right', beginAtZero: false, min: yMin, max: yMax,
@@ -3561,9 +3734,9 @@ if (typeof module !== 'undefined') module.exports = AN;
       plugins: [levelLines, crosshair],
     });
     charts.push(chart);
-    attachZoom(cv, chart);
-    attachCrosshair(cv, chart, dp);
-    drawSubPanes(rows, labels);
+    attachZoom(cv);
+    attachCrosshair(cv);
+    drawSubPanes(rows, labels, win);
   }
 
   function renderOpen() {
@@ -3943,9 +4116,9 @@ if (typeof module !== 'undefined') module.exports = AN;
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();
     s.fx = {};
-    $$('#s-fx [data-fx]').forEach(i => { const v = parseFloat(i.value); if (v > 0) s.fx[i.dataset.fx] = v; });
-    s.fx = {};
-    $$('#s-fx [data-fx]').forEach(i => { const v = parseFloat(i.value); if (v > 0) s.fx[i.dataset.fx] = v; });
+    // 0 and negatives were already dropped; a fat-fingered exponent is just as wrong and would
+    // silently rescale every converted figure on the page, so it is dropped on the same rule.
+    $$('#s-fx [data-fx]').forEach(i => { const v = parseFloat(i.value); if (v > 0 && v < 1e6) s.fx[i.dataset.fx] = v; });
     s.riskKeep = $('#s-riskkeep').value.trim() || 25;
     s.tags = $('#s-tags').value.split(',').map(x => x.trim()).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, 20);
     if (S.f.tag && !s.tags.includes(S.f.tag)) S.f.tag = '';
