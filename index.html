@@ -1217,6 +1217,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
         <div class="full switch"><div class="txt">Auto-refresh open positions<small>Polls only the positions endpoint. A full history sync runs when a position closes, when you return to the tab, and every five minutes.</small></div><button class="sw" id="s-autosync" data-act="toggle-costs" role="switch" aria-label="Auto-refresh"></button></div>
         <div class="field full"><label>Exchange rates</label><div id="s-fx"></div><div class="help">Used only for positions priced in another currency. Nothing is converted unless you supply the rate, so the total is never based on a number this app guessed.</div></div>
         <div class="field"><label for="s-closetoken">Close token (optional)</label><input type="password" id="s-closetoken" placeholder="leave blank to be asked each time" autocomplete="off"><div class="help">Enables the Close button on open positions. Must match CLOSE_TOKEN on your worker, and must differ from the sync token. Leave blank and you will be prompted per close instead of storing it.</div></div>
+        <div class="field"><label for="s-ordertoken">Order token (optional)</label><input type="password" id="s-ordertoken" placeholder="leave blank to be asked each time" autocomplete="off"><div class="help">Enables <b>New order</b>, which opens positions. Deliberately a different secret from the close token: a leaked close token can only shut positions, one that could also open them is a far bigger problem. Must match ORDER_TOKEN on your worker.</div></div>
         <div class="field"><label for="s-pollsecs">Refresh every (seconds)</label><input type="number" id="s-pollsecs" min="2" max="60" step="0.5" placeholder="2"><div class="help">Minimum 2s. IG allows roughly 40 requests a minute; 2s uses 30 and leaves headroom.</div></div>
         <div class="field full"><label>Activity history files</label><div id="s-actfiles"></div><div class="help">Files accumulate rather than replace, so several exports can be layered to cover a longer history.</div></div>
         <div class="full switch"><div class="txt">Hide weekends on the calendar<small>Saturday and Sunday columns are dropped. If a weekend ever has activity, it is shown anyway so nothing disappears.</small></div><button class="sw" id="s-weekend" data-act="toggle-costs" role="switch" aria-label="Hide weekends"></button></div>
@@ -2319,7 +2320,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -3314,6 +3315,135 @@ if (typeof module !== 'undefined') module.exports = AN;
     });
   }
 
+  // ---- placing an order ----
+  // Everything else here is close-only, which can only ever reduce exposure. This can create it,
+  // so it sits behind its own token: if a close token leaks the worst case is your positions get
+  // shut; an order token that could also open them is a much larger blast radius, and there is no
+  // reason to make one key do both.
+  const orderTokenValue = () => S.settings.orderToken || sessionOrderToken || '';
+  let sessionOrderToken = null;
+
+  // Epics the account has actually touched, so the field is a pick list rather than a guess.
+  function knownEpics() {
+    const m = new Map();
+    for (const r of [...(S.positions || []), ...(S.orders || [])]) if (r.epic) m.set(r.epic, r.market || r.epic);
+    for (const t of S.trades) if (t.epic && !m.has(t.epic)) m.set(t.epic, t.instrument || t.epic);
+    return Array.from(m, ([epic, name]) => ({ epic, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function orderDialog() {
+    if (!syncBase()) { toast('Placing orders needs the IG sync worker.'); return; }
+    const epics = knownEpics();
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay open';
+    wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><div><h3>New order</h3><p>Opens a position on IG. This cannot be undone from here.</p></div>
+          <button class="btn ghost icon sm" data-x aria-label="Close">${I.x}</button></div>
+        <div class="modal-body">
+          <div class="settings-form">
+            <div class="field full"><label for="or-epic">Instrument (IG epic)</label>
+              <input type="text" id="or-epic" list="or-epics" placeholder="e.g. IX.D.SPTRD.IFE.IP" spellcheck="false" autocomplete="off">
+              <datalist id="or-epics">${epics.map(e => `<option value="${esc(e.epic)}">${esc(e.name)}</option>`).join('')}</datalist>
+              <div class="help">${epics.length ? 'Instruments this account has traded are offered above.' : 'No epics known yet — sync or open a position first, or type one.'}</div></div>
+            <div class="field"><label>Direction</label>
+              <span class="tabs" id="or-dir">
+                <button class="tab active" data-dir="BUY">Buy</button><button class="tab" data-dir="SELL">Sell</button></span></div>
+            <div class="field"><label>Type</label>
+              <span class="tabs" id="or-type">
+                <button class="tab active" data-type="MARKET">Market</button><button class="tab" data-type="LIMIT">Limit</button></span></div>
+            <div class="field"><label for="or-size">Size</label><input type="number" id="or-size" step="any" min="0" placeholder="e.g. 1"></div>
+            <div class="field hidden" id="or-level-wrap"><label for="or-level">Trigger price</label><input type="number" id="or-level" step="any" placeholder="price to fill at"></div>
+            <div class="field"><label for="or-stop">Stop distance (points, optional)</label><input type="number" id="or-stop" step="any" min="0" placeholder="none"></div>
+            <div class="field"><label for="or-limit">Target distance (points, optional)</label><input type="number" id="or-limit" step="any" min="0" placeholder="none"></div>
+            ${orderTokenValue() ? '' : `<div class="field full"><label for="or-tok">Order token</label>
+              <input type="password" id="or-tok" placeholder="the ORDER_TOKEN set on your worker" autocomplete="off">
+              <div class="help">Held for this browser session only. Save it in Settings if you would rather not retype it.</div></div>`}
+          </div>
+          <div class="notice" style="margin-top:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <div id="or-summary">Fill in an instrument and a size.</div></div>
+          <div class="err" id="or-err" style="margin-top:10px"></div>
+          <div class="dim" id="or-status" style="font-size:11.5px;margin-top:6px"></div>
+        </div>
+        <div class="modal-foot"><button class="btn ghost" data-x>Cancel</button>
+          <div class="right"><button class="btn primary" data-send disabled>Place order</button></div></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const done = () => wrap.remove();
+    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
+    const q = id => wrap.querySelector('#' + id);
+    let dir = 'BUY', type = 'MARKET';
+    const err = q('or-err'), status = q('or-status'), summary = q('or-summary'), send = wrap.querySelector('[data-send]');
+    const seg = (id, set) => wrap.querySelectorAll(`#${id} [data-${id === 'or-dir' ? 'dir' : 'type'}]`).forEach(b =>
+      b.addEventListener('click', () => {
+        wrap.querySelectorAll(`#${id} .tab`).forEach(x => x.classList.toggle('active', x === b));
+        set(b.dataset.dir || b.dataset.type); describe();
+      }));
+    seg('or-dir', v => { dir = v; });
+    seg('or-type', v => { type = v; q('or-level-wrap').classList.toggle('hidden', type !== 'LIMIT'); });
+
+    // The summary is the safety rail: nothing can be sent until it reads back what will happen.
+    function describe() {
+      const epic = q('or-epic').value.trim(), size = parseFloat(q('or-size').value);
+      const level = parseFloat(q('or-level').value), stop = parseFloat(q('or-stop').value);
+      if (!epic || !isFinite(size) || size <= 0) {
+        summary.textContent = 'Fill in an instrument and a size.'; send.disabled = true; return;
+      }
+      if (type === 'LIMIT' && (!isFinite(level) || level <= 0)) {
+        summary.textContent = 'A limit order needs the price to fill at.'; send.disabled = true; return;
+      }
+      const known = epics.find(e => e.epic === epic);
+      const unit = known ? pointValueFor(known.name, epic) : null;
+      const risk = unit && isFinite(stop) && stop > 0 ? ` Risking about <b>${money(stop * unit * size)}</b> if the stop is hit.` : '';
+      summary.innerHTML = `<b>${dir === 'BUY' ? 'Buy' : 'Sell'} ${size}</b> of <b>${esc(known ? known.name : epic)}</b> `
+        + (type === 'MARKET' ? 'at the market price, now.' : `only if it trades at <b>${level}</b>.`)
+        + risk + (unit ? '' : ' <span class="dim">No value-per-point known for this instrument, so no risk estimate.</span>');
+      send.disabled = false;
+    }
+    ['or-epic', 'or-size', 'or-level', 'or-stop', 'or-limit'].forEach(id => q(id).addEventListener('input', describe));
+    describe();
+    setTimeout(() => q('or-epic').focus(), 30);
+
+    const idempotencyKey = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random();
+    let sending = false;
+    send.addEventListener('click', async () => {
+      if (sending) return;
+      const epic = q('or-epic').value.trim(), size = parseFloat(q('or-size').value);
+      const level = parseFloat(q('or-level').value), stop = parseFloat(q('or-stop').value), lim = parseFloat(q('or-limit').value);
+      const tok = orderTokenValue() || (q('or-tok') ? q('or-tok').value.trim() : '');
+      if (!tok) { err.textContent = 'Enter your order token.'; return; }
+      sending = true; send.disabled = true; err.textContent = '';
+      status.textContent = 'Sending to IG, then waiting for confirmation…';
+      try {
+        const res = await fetch(`${syncBase()}/order`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ epic, direction: dir, size, orderType: type,
+            ...(type === 'LIMIT' ? { level } : {}),
+            ...(isFinite(stop) && stop > 0 ? { stopDistance: stop } : {}),
+            ...(isFinite(lim) && lim > 0 ? { limitDistance: lim } : {}),
+            idempotencyKey }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+        if (!orderTokenValue()) sessionOrderToken = tok;
+        if (data.dealStatus === 'ACCEPTED') {
+          done();
+          toast(`${type === 'MARKET' ? 'Opened' : 'Placed'} ${dir === 'BUY' ? 'buy' : 'sell'} ${size} on ${esc(epic)}. IG confirmed.`, 8000);
+          fetchPositions(); fetchOrders(true); runSync(true);
+        } else if (data.dealStatus === 'UNCONFIRMED') {
+          // it may well have gone on; retrying could double the position
+          status.textContent = ''; send.disabled = true;
+          err.textContent = data.reason || 'IG did not confirm. Check the IG app before retrying — the order may have gone on.';
+        } else {
+          status.textContent = ''; send.disabled = false; sending = false;
+          err.textContent = `IG rejected the order: ${data.reason || data.dealStatus}`;
+        }
+      } catch (e2) {
+        status.textContent = ''; send.disabled = false; sending = false;
+        err.textContent = String(e2.message || e2);
+      }
+    });
+  }
+
   function ordersCard() {
     if (S.ordError) return `<div class="card"><div class="card-head"><div class="card-title">Pending orders</div><span class="live bad">Error</span></div><div class="card-body dim" style="font-size:12px">${esc(S.ordError)}</div></div>`;
     const rows = S.orders;
@@ -4080,7 +4210,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     if (!rows) { el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div><div class="card-body dim" style="font-size:12px">Checking…</div></div>`; restore(); return; }
     if (!rows.length) {
-      el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div>${head}</div>
+      el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions</div><div class="tbl-tools"><button class="btn sm" data-neworder>New order</button>${head}</div></div>
         <div class="card-body dim" style="font-size:12px">Nothing open. Polling drops to every 15 seconds until a position appears.${stamp ? ` Last checked ${age}s ago.` : ''}</div></div>` + ordersCard(); restore(); return;
     }
     const acct = accountCcy();
@@ -4094,7 +4224,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     // live risk against the session cap, which is the part IG's own app will not tell you
     const cap = D.risk && D.risk.discipline ? D.risk.discipline : null;
     const sess = D.risk && D.risk.sessions ? D.risk.sessions[D.risk.sessions.length - 1] : null;
-    el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Unrealised, and excluded from every statistic in this app</small></div>${head}</div>
+    el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>Unrealised, and excluded from every statistic in this app</small></div><div class="tbl-tools"><button class="btn sm" data-neworder>New order</button>${head}</div></div>
       <div class="card-body">
         <div class="stat-row" style="padding-bottom:12px">
           <div><span class="k">Unrealised P&L</span><b class="${cls(net)}">${native.length ? signed(net) : '—'}</b><span class="k">${plural(rows.length, 'position')}${foreign.length ? ` · ${foreign.length} not totalled, no rate set` : (converted.length ? ` · ${converted.length} converted at your rate` : '')}</span></div>
@@ -4374,7 +4504,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     if (t.startsWith('{') || t.startsWith('[')) {
       try { const obj = JSON.parse(t); const trades = Array.isArray(obj) ? obj : obj.trades; if (!Array.isArray(trades)) throw 0;
-        if (obj.settings) { const { syncUrl, syncToken, closeToken, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
+        if (obj.settings) { const { syncUrl, syncToken, closeToken, orderToken, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
         const norm = trades.map(x => ({ ...x, kind: x.kind || 'trade', id: x.id || C.tradeKey(x) }));
         // backups may hold several accounts: restore as a whole
         S.pending = null; S.trades = norm; S.selectedDay = null; if (obj.activity) S.activity = obj.activity; applyActivity(); persist(); closeModals(); renderAll(); toast(`Restored ${plural(norm.filter(x => x.kind === 'trade').length, 'trade')} from backup. Previous data replaced.`); return;
@@ -4433,7 +4563,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     $('#s-profit-color').oninput = onPick; $('#s-loss-color').oninput = onPick; $('#s-riskcap').value = s.riskCapPct === 0 || s.riskCapPct ? s.riskCapPct : 50;
     $('#s-syncurl').value = s.syncUrl || ''; $('#s-synctoken').value = s.syncToken || ''; $('#s-syncdays').value = s.syncDays || 180;
     $('#s-autosync').classList.toggle('on', s.autoSync !== false);
-    $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || '';
+    $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || ''; $('#s-ordertoken').value = s.orderToken || '';
     const ccys = fxCurrencies(), acctC = accountCcy() || 'your currency', seen = igRatesSeen();
     $('#s-fx').innerHTML = ccys.length
       ? ccys.map(c => `<div class="fx-row"><label for="fx-${c}">1 ${c} =</label><input type="number" id="fx-${c}" data-fx="${c}" step="0.0001" min="0" placeholder="rate" value="${esc(String((s.fx || {})[c] ?? ''))}"><span>${esc(acctC)}</span></div>`).join('')
@@ -4458,6 +4588,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     s.syncUrl = $('#s-syncurl').value.trim(); s.syncToken = $('#s-synctoken').value.trim(); s.syncDays = parseInt($('#s-syncdays').value) || 180;
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();
+    s.orderToken = $('#s-ordertoken').value.trim();
     s.fx = {};
     // 0 and negatives were already dropped; a fat-fingered exponent is just as wrong and would
     // silently rescale every converted figure on the page, so it is dropped on the same rule.
@@ -4621,7 +4752,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   // Never let sync credentials leave the browser inside a shared file. The token grants access
   // to the worker, and therefore to the IG account behind it.
-  const safeSettings = () => { const { syncUrl, syncToken, closeToken, ...rest } = S.settings || {}; return rest; };
+  const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, ...rest } = S.settings || {}; return rest; };
 
   function exportSnapshot() {
     const payload = { exported: new Date().toISOString(), trades: S.trades, settings: safeSettings(), theme: S.theme, filters: S.f, section: S.section, activity: S.activity, label: `${rangeLabel(D.tr)}` };
@@ -4755,6 +4886,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (ch) openChart(ch.dataset.chart);
     const cl = e.target.closest('[data-close]');
     if (cl) confirmClose(cl.dataset.close);
+    if (e.target.closest('[data-neworder]') && !RO) orderDialog();
     const ss = e.target.closest('[data-softstop]'); if (ss && !RO) armStopDialog(ss.dataset.softstop);
     const del = e.target.closest('[data-del]'); if (del && !RO) { S.trades = S.trades.filter(t => t.id !== del.dataset.del); persist(); renderAll(); toast('Trade deleted.'); }
   });
