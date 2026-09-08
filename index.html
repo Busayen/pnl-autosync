@@ -972,6 +972,13 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .fx-row label { min-width: 62px; }
 .fx-row input { width: 120px; }
 .fx-row span { color: var(--text-3); }
+
+.symlink { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; border-bottom: 1px dashed var(--border-strong); }
+.symlink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+#chartpanel:empty { display: none; }
+#chartpanel { margin-top: 20px; }
+#chartpanel .cw.tall { height: 340px; }
+@media (max-width: 760px) { #chartpanel .cw.tall { height: 240px; } #chartpanel .tbl-tools { width: 100%; } }
 </style>
 <script>/*!
  * Chart.js v4.4.1
@@ -1080,6 +1087,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 
       <!-- OPEN POSITIONS -->
       <div class="section hidden" data-sec="open" id="open" style="display:grid;gap:20px"></div>
+      <div id="chartpanel"></div>
 
       <!-- TRADES -->
       <div class="section hidden" data-sec="trades">
@@ -2393,6 +2401,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     $$('#subnav [data-section]').forEach(b => b.addEventListener('click', () => setSection(b.dataset.section)));
   }
   function setSection(k) {
+    if (k !== 'open') closeChart();
     S.section = k; $$('#subnav .snav').forEach(b => b.classList.toggle('active', b.dataset.section === k));
     $$('.section').forEach(sec => sec.classList.toggle('hidden', sec.dataset.sec !== k));
     killCharts(); drawCharts(); persist(); window.scrollTo({ top: 0, behavior: 'smooth' }); setTimeout(scrollNavIntoView, 60);
@@ -3103,6 +3112,149 @@ if (typeof module !== 'undefined') module.exports = AN;
       </div></div>`;
   }
 
+
+  // ---- position chart ----
+  // Candles come from IG's historical endpoint, which is capped at 10,000 points a WEEK, so
+  // they are fetched once per open and never polled. The live price line is driven by the
+  // position feed that is already running, which costs nothing extra.
+  let chartState = null;
+  const RES_CHOICES = [['MINUTE', '1m'], ['MINUTE_5', '5m'], ['MINUTE_15', '15m'], ['HOUR', '1h'], ['DAY', '1D']];
+
+  // Chart.js has no candlestick type; floating bars give wicks and bodies with no extra library.
+  const levelLines = {
+    id: 'levelLines',
+    afterDatasetsDraw(chart, args, opts) {
+      const { ctx, chartArea: a, scales: { y } } = chart;
+      if (!a || !opts || !opts.lines) return;
+      ctx.save();
+      for (const ln of opts.lines) {
+        if (ln.value == null || !isFinite(ln.value)) continue;
+        const py = y.getPixelForValue(ln.value);
+        if (py < a.top - 1 || py > a.bottom + 1) continue;
+        ctx.beginPath(); ctx.setLineDash(ln.dash || []); ctx.lineWidth = ln.width || 1.25;
+        ctx.strokeStyle = ln.color; ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+        const label = `${ln.label} ${ln.value}`;
+        ctx.setLineDash([]); ctx.font = '600 10px Inter, system-ui, sans-serif';
+        const w = ctx.measureText(label).width + 10;
+        ctx.fillStyle = ln.color; ctx.fillRect(a.right - w, py - 8, w, 16);
+        ctx.fillStyle = ln.text || '#fff'; ctx.textBaseline = 'middle';
+        ctx.fillText(label, a.right - w + 5, py);
+      }
+      ctx.restore();
+    },
+  };
+
+  async function openChart(dealId) {
+    const p = (S.positions || []).find(x => x.dealId === dealId);
+    if (!p) return;
+    if (!syncBase()) { toast('The chart needs the IG sync worker.'); return; }
+    chartState = { dealId, res: (chartState && chartState.res) || 'MINUTE_5', candles: null, allowance: null, err: null, loading: true };
+    renderChartPanel();
+    await loadCandles();
+  }
+  async function loadCandles() {
+    if (!chartState) return;
+    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (!p || !p.epic) { chartState.err = 'This position has no instrument code, so candles cannot be fetched.'; chartState.loading = false; renderChartPanel(); return; }
+    chartState.loading = true; renderChartPanel();
+    try {
+      const url = `${syncBase()}/candles?epic=${encodeURIComponent(p.epic)}&resolution=${chartState.res}&max=150`;
+      const res = await fetch(url, { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      chartState.candles = data.candles || [];
+      chartState.allowance = data.allowance || null;
+      chartState.cached = !!data.cached;
+      chartState.err = null;
+    } catch (e) { chartState.err = String(e.message || e); }
+    chartState.loading = false;
+    renderChartPanel();
+  }
+  function closeChart() { chartState = null; const el = $('#chartpanel'); if (el) el.innerHTML = ''; }
+
+  function renderChartPanel() {
+    const el = $('#chartpanel'); if (!el) return;
+    if (!chartState) { el.innerHTML = ''; return; }
+    const p = (S.positions || []).find(x => x.dealId === chartState.dealId);
+    if (!p) { closeChart(); return; }
+    const a = chartState.allowance;
+    el.innerHTML = `<div class="card chart wide" id="chartcard">
+        <div class="card-head">
+          <div class="card-title">${esc(p.market || p.epic)}<small>${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}${chartState.cached ? ' · cached' : ''}</small></div>
+          <div class="tbl-tools">
+            <span class="tabs">${RES_CHOICES.map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
+            <button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+        </div>
+        <div class="stat-row" style="padding:12px 16px 6px">
+          <div><span class="k">Unrealised</span><b class="${cls(p.pnl)}">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</b><span class="k">${p.cur != null ? `now ${p.cur}` : ''}</span></div>
+          <div><span class="k">R</span><b class="${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</b><span class="k">${p.risk != null ? `risking ${moneyIn(p.risk, p.ccy)}` : (p.locked != null ? 'stop beyond entry' : '')}</span></div>
+          <div><span class="k">Stop / target</span><b class="num">${p.stopLevel ?? '—'} <span class="dim">/</span> ${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
+          <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
+        </div>
+        ${chartState.err ? `<div class="card-body"><div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(chartState.err)}</div></div></div>`
+          : `<div class="cw tall" style="padding:0 10px 6px"><canvas id="c-pos"></canvas></div>`}
+        <div class="dim" style="font-size:11px;padding:0 16px 12px">${chartState.loading ? 'Loading candles…' : ''}${a ? `IG historical allowance: ${a.remaining.toLocaleString()} of ${a.total.toLocaleString()} points left this week. Candles are fetched once per view; the price line updates from the position feed.` : ''}</div>
+      </div>`;
+    el.querySelectorAll('[data-res]').forEach(b => b.addEventListener('click', () => { chartState.res = b.dataset.res; loadCandles(); }));
+    el.querySelector('[data-chartclose]').addEventListener('click', closeChart);
+    drawPositionChart(p);
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function drawPositionChart(p) {
+    const cv = $('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
+    const rows = chartState.candles;
+    if (!rows.length) return;
+    const labels = rows.map(c => (c.t || '').slice(11, 16) || (c.t || '').slice(5, 10));
+    const up = cssVar('--profit'), down = cssVar('--loss');
+    const colors = rows.map(c => (c.c >= c.o ? up : down));
+    const marks = [p.level, p.stopLevel, p.limitLevel, p.cur].filter(v => v != null && isFinite(v));
+    const lo = Math.min(...rows.map(c => c.l), ...marks);
+    const hi = Math.max(...rows.map(c => c.h), ...marks);
+    const pad = (hi - lo) * 0.06 || Math.abs(hi) * 0.001 || 1;
+    const yMin = lo - pad, yMax = hi + pad;
+    // price precision varies wildly across instruments: 7800 vs 1.16082
+    const dp = (hi - lo) < 1 ? 5 : (hi - lo) < 20 ? 3 : 2;
+    const ctx = cv.getContext('2d');
+    // `charts` is a flat array here; drop any previous instance bound to this canvas first
+    for (let i = charts.length - 1; i >= 0; i--) {
+      if (charts[i].canvas === cv) { charts[i].destroy(); charts.splice(i, 1); }
+    }
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [
+        { label: 'range', data: rows.map(c => [c.l, c.h]), backgroundColor: colors, barPercentage: 0.14, categoryPercentage: 0.9, order: 2 },
+        { label: 'body', data: rows.map(c => [Math.min(c.o, c.c), Math.max(c.o, c.c)]), backgroundColor: colors, barPercentage: 0.62, categoryPercentage: 0.9, order: 1 },
+      ] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        scales: {
+          x: { grid: { display: false }, ticks: { color: cssVar('--text-3'), maxTicksLimit: 8, font: { size: 10 } } },
+          // Bar charts start at zero by default, which flattens candles into a line. Fit the
+          // range to the data AND the level lines, so entry, stop and target stay on screen.
+          y: { position: 'right', beginAtZero: false, min: yMin, max: yMax,
+               grid: { color: cssVar('--grid') },
+               ticks: { color: cssVar('--text-3'), font: { size: 10 }, maxTicksLimit: 7,
+                        callback: v => (Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(dp)) } },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => { const r = rows[c.dataIndex];
+            return `O ${r.o}  H ${r.h}  L ${r.l}  C ${r.c}`; } } },
+          levelLines: { lines: [
+            { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
+            { value: p.stopLevel, label: 'stop', color: cssVar('--loss'), dash: [5, 4] },
+            { value: p.limitLevel, label: 'target', color: cssVar('--profit'), dash: [5, 4] },
+            { value: p.cur, label: 'now', color: cssVar('--accent'), text: cssVar('--accent-text'), width: 1.5 },
+          ] },
+        },
+      },
+      plugins: [levelLines],
+    });
+    charts.push(chart);
+  }
+
   function renderOpen() {
     const el = $('#open'); if (!el) return;
     // Both cards are rebuilt on every poll. Keyed rather than indexed, because the positions
@@ -3149,7 +3301,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         </div>
         <div class="tbl-wrap" data-sk="positions"><table><thead><tr><th>Symbol</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Now</th><th class="r">Stop</th><th class="r">Risk</th><th class="r">R</th><th class="r">P&L</th><th class="act"></th></tr></thead><tbody>
           ${rows.map(p => `<tr>
-            <td class="sym">${esc(p.market || p.epic || '—')}${p.guaranteedStop ? '<span class="tag">G</span>' : ''}${p.unitSource !== 'history' ? '<span class="tag" title="Value per point taken from IG&apos;s contract size, not from your own closed trades">approx</span>' : ''}${p.converted ? `<span class="tag" title="Converted from ${esc(p.converted.from)} at ${p.converted.rate}, the rate you set">fx</span>` : ''}</td>
+            <td class="sym"><button class="symlink" data-chart="${esc(p.dealId)}" title="Open chart">${esc(p.market || p.epic || '—')}</button>${p.guaranteedStop ? '<span class="tag">G</span>' : ''}${p.unitSource !== 'history' ? '<span class="tag" title="Value per point taken from IG&apos;s contract size, not from your own closed trades">approx</span>' : ''}${p.converted ? `<span class="tag" title="Converted from ${esc(p.converted.from)} at ${p.converted.rate}, the rate you set">fx</span>` : ''}</td>
             <td><span class="side ${p.long ? 'long' : 'short'}">${p.long ? 'Long' : 'Short'}</span></td>
             <td class="r num muted">${p.size}</td>
             <td class="r num muted">${p.level ?? '—'}</td>
@@ -3193,7 +3345,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function drawCharts() {
     if (!S.trades.length) return;
-    if (S.section === 'open') renderOpen();
+    if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
     switch (S.section) { case 'overview': drawEquity(); break; case 'performance': drawPerformance(); break; case 'risk': drawRisk(); break; case 'trends': drawTrends(); break; }
   }
   function renderAll() {
@@ -3274,7 +3426,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.posError = String(err.message || err); pollFails++;
     }
     S.posBusy = false;
-    if (S.section === 'open') renderOpen();
+    if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
     renderNav();
   }
 
@@ -3292,7 +3444,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.orders = applyFx(computeOrders(data.orders)); S.ordFetched = data.fetched; S.ordError = null;
     } catch (err) { S.ordError = String(err.message || err); }
     S.ordBusy = false;
-    if (S.section === 'open') renderOpen();
+    if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
   }
 
   function pollInterval() {
@@ -3772,6 +3924,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       else if (a === 'toggle-all') { S.showAll = !S.showAll; renderTable(); } else if (a === 'toggle-costs') b.classList.toggle('on'); else if (a === 'how') $('#how').classList.toggle('open');
       else if (a === 'cmd') openCmd();
       else if (a === 'wipe') { if (confirm('Delete every trade from this browser? Settings are kept.')) { S.trades = []; S.selectedDay = null; persist(); closeModals(); renderAll(); toast('All trades deleted.'); } } }
+    const ch = e.target.closest('[data-chart]');
+    if (ch) openChart(ch.dataset.chart);
     const cl = e.target.closest('[data-close]');
     if (cl) confirmClose(cl.dataset.close);
     const del = e.target.closest('[data-del]'); if (del && !RO) { S.trades = S.trades.filter(t => t.id !== del.dataset.del); persist(); renderAll(); toast('Trade deleted.'); }
