@@ -1,5 +1,7 @@
 # Ledger — a self-contained PnL trading dashboard
 
+README is not updated to the latest version 
+
 A single HTML file that turns broker exports into a proper trading review: equity curve,
 heatmap calendar, R-multiples, session analysis, risk-rule adherence and confidence intervals.
 
