@@ -437,6 +437,100 @@ async function liveCandleAndTv(browser) {
   await page.context().close();
 }
 
+// App-side stops send a real close order at a price this tab watches for. Every failure mode here
+// is money, so each one is pinned down: it must not fire early, must fire exactly once, must not
+// retry into a rejection, and must keep watching when the tab is hidden.
+async function appSideStops(browser) {
+  const at = (bid, offer, extra) => { state = { orders: [], ...(extra || {}), positions: [{ dealId: 'D1',
+    epic: 'E', market: 'US 500', direction: 'BUY', size: 2, level: 5000, bid, offer,
+    stopLevel: 4900, contractSize: 1, currency: 'USD' }] }; };
+  const closes = () => calls.filter(c => c.p === '/close');
+  const stops = page => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).settings.softStops || {});
+  const arm = async (page, price) => {
+    await page.evaluate(() => document.querySelector('[data-softstop]')?.click());
+    await page.waitForTimeout(400);
+    await page.fill('#ss-price', String(price));
+    await page.evaluate(() => document.querySelector('[data-arm]')?.click());
+    await page.waitForTimeout(700);
+  };
+  const hide = (page, h) => page.evaluate(v => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => v });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, h);
+
+  at(5100, 5101);
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.closeToken = 'CLOSETOK'; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+
+  await page.evaluate(() => document.querySelector('[data-softstop]')?.click());
+  await page.waitForTimeout(400);
+  check('the dialog says it only works while the tab is open',
+    /only works while this tab is open/i.test(await page.evaluate(() => document.querySelector('.overlay.open .modal')?.innerText || '')));
+  await page.fill('#ss-price', '5200');                    // above a long's price: already through
+  await page.evaluate(() => document.querySelector('[data-arm]')?.click());
+  await page.waitForTimeout(300);
+  check('a level already through the price is refused',
+    /already through/i.test(await page.evaluate(() => document.querySelector('#ss-err')?.textContent || '')));
+  await page.fill('#ss-price', '5050');
+  check('it shows the distance and what is at risk',
+    /50\.00 away/.test(await page.evaluate(() => document.querySelector('#ss-dist')?.textContent || '')));
+  calls = [];
+  await page.evaluate(() => document.querySelector('[data-arm]')?.click());
+  await page.waitForTimeout(700);
+  const armed = await stops(page);
+  check('arming stores the level and an idempotency key', armed.D1 && armed.D1.price === 5050 && !!armed.D1.key, JSON.stringify(armed.D1 || null));
+  check('the open section warns that it needs the tab open',
+    /only work while this tab is open/i.test(await page.evaluate(() => document.querySelector('#open')?.innerText || '')));
+
+  at(5060, 5061); await page.waitForTimeout(3000);
+  check('it does not fire before the level', closes().length === 0, `${closes().length} sends`);
+  at(5045, 5046); await page.waitForTimeout(4000);
+  check('it fires once through the level', closes().length === 1, `${closes().length} sends`);
+  const body = closes()[0] ? JSON.parse(closes()[0].body) : {};
+  check('the close carries the key minted when it was armed', body.idempotencyKey === armed.D1.key, body.idempotencyKey);
+  check('the stop is cleared once IG confirms', Object.keys(await stops(page)).length === 0);
+  await page.waitForTimeout(3500);
+  check('it does not send again after firing', closes().length === 1, `${closes().length} sends`);
+
+  // a rejection must be reported, not retried in a loop
+  at(5100, 5101, { closeBody: { dealStatus: 'REJECTED', reason: 'MARKET_CLOSED' } });
+  await page.waitForTimeout(2500);
+  await arm(page, 5050);
+  calls = [];
+  at(5040, 5041, { closeBody: { dealStatus: 'REJECTED', reason: 'MARKET_CLOSED' } });
+  await page.waitForTimeout(4000);
+  check('a rejection is sent once, not retried', closes().length === 1, `${closes().length} sends`);
+  check('a rejection is surfaced in the open section',
+    /MARKET_CLOSED/.test(await page.evaluate(() => document.querySelector('#open')?.innerText || '')));
+  await page.waitForTimeout(3500);
+  check('a rejected stop stays quiet afterwards', closes().length === 1, `${closes().length} sends`);
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.softStops = {}; localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+
+  // hidden tab: no stop means no polling, an armed stop means keep watching
+  at(5100, 5101);
+  await page.reload({ waitUntil: 'load' }); await page.waitForTimeout(1500);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1100);
+  calls = []; await hide(page, true); await page.waitForTimeout(5000);
+  check('a hidden tab stops polling when nothing is armed',
+    calls.filter(c => c.p === '/positions').length === 0, `${calls.filter(c => c.p === '/positions').length} polls`);
+  await hide(page, false); await page.waitForTimeout(1500);
+  await arm(page, 5050);
+  calls = []; await hide(page, true); await page.waitForTimeout(5500);
+  check('a hidden tab keeps polling while a stop is armed',
+    calls.filter(c => c.p === '/positions').length > 0, `${calls.filter(c => c.p === '/positions').length} polls`);
+  calls = []; at(5040, 5041); await page.waitForTimeout(5000);
+  check('an armed stop still fires while the tab is hidden', closes().length === 1, `${closes().length} sends`);
+  check('no page errors through the stop paths', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -449,7 +543,8 @@ async function liveCandleAndTv(browser) {
       ['foreign currency', foreignCurrency], ['IG reference rates', igReferenceRates],
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
       ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
-      ['live bar + TradingView', liveCandleAndTv]]) {
+      ['live bar + TradingView', liveCandleAndTv],
+      ['app-side stops', appSideStops]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }

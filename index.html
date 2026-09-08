@@ -987,6 +987,8 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 @media (max-width: 760px) { #tvpanel iframe { height: min(60vh, 420px); } }
 #tvpanel .tv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #tvpanel .tv-head input { height: 28px; font-size: 12px; width: 190px; }
+.btn.armed { color: #f59e0b; border-color: rgba(245,158,11,.45); }
+.btn.armed:hover { border-color: rgba(245,158,11,.75); }
 #chartpanel { margin-top: 20px; }
 #chartpanel .cw.tall { height: 340px; }
 @media (max-width: 760px) {
@@ -2317,7 +2319,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {}, tv: { on: false, symbols: {} } },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -3128,6 +3130,136 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
 
 
+  // ---- app-side stops ----
+  // IG will not accept a stop closer than its minimum distance. This watches the price itself and
+  // sends the same close order the Close button sends when the level is reached. It is a genuine
+  // stop in one sense — it does close the position — and emphatically not one in another: it runs
+  // in this browser tab, so it cannot act while the tab is shut, the machine is asleep, the
+  // network is down, or the market gaps through the level. Treat it as a convenience on top of a
+  // broker stop, never as a replacement for one.
+  const softStops = () => (S.settings.softStops = S.settings.softStops || {});
+  const armedStop = id => { const st = softStops()[id]; return st && (st.state === 'armed' || st.state === 'firing') ? st : null; };
+  const anyArmed = () => Object.keys(softStops()).some(id => armedStop(id));
+  const newKey = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+
+  // A long exits at the bid and a short at the offer, which is exactly what p.cur already holds.
+  const stopHit = (p, st) => p.cur != null && (p.long ? p.cur <= st.price : p.cur >= st.price);
+
+  function checkSoftStops() {
+    const stops = softStops();
+    if (!Array.isArray(S.positions)) return;
+    const live = new Set(S.positions.map(x => x.dealId));
+    let dirty = false;
+    // a position that has gone has nothing left to stop out of
+    for (const id of Object.keys(stops)) if (!live.has(id)) { delete stops[id]; dirty = true; }
+    for (const p of S.positions) {
+      const st = stops[p.dealId];
+      if (!st || st.state !== 'armed') continue;
+      if (stopHit(p, st)) fireSoftStop(p, st);
+    }
+    if (dirty) persist();
+  }
+
+  async function fireSoftStop(p, st) {
+    const tok = closeTokenValue();
+    if (!tok) {
+      st.state = 'error';
+      st.note = 'Reached, but no close token is saved so nothing could be sent. Save one in Settings.';
+      persist(); renderOpen();
+      toast(`App stop on ${p.market || p.epic} was reached but could not fire: no close token saved.`, 15000);
+      return;
+    }
+    st.state = 'firing'; st.hitAt = new Date().toISOString(); st.hitPrice = p.cur; persist(); renderOpen();
+    try {
+      const res = await fetch(`${syncBase()}/close`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        // the key is minted when the stop is armed and reused on every attempt, so a retry after a
+        // timeout cannot become a second close
+        body: JSON.stringify({ dealId: p.dealId, direction: p.direction, size: p.size, idempotencyKey: st.key }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      if (data.dealStatus === 'ACCEPTED') {
+        delete softStops()[p.dealId]; persist();
+        toast(`App stop hit at ${st.hitPrice}: closed ${p.market || p.epic}${data.profit != null ? ` for ${signed(Number(data.profit))}` : ''}. IG confirmed.`, 9000);
+        fetchPositions(); runSync(true);
+      } else if (data.dealStatus === 'UNCONFIRMED') {
+        // it may well have filled, so stop trying and make someone look
+        st.state = 'unconfirmed'; st.note = data.reason || 'IG did not confirm. Check the IG app before doing anything else.';
+        persist();
+        toast(`App stop on ${p.market || p.epic}: IG did not confirm the close. Check the IG app.`, 20000);
+      } else {
+        st.state = 'error'; st.note = `IG rejected the close: ${data.reason || data.dealStatus}`;
+        persist();
+        toast(`App stop on ${p.market || p.epic} was rejected by IG: ${data.reason || data.dealStatus}`, 15000);
+      }
+    } catch (e) {
+      // a network blip is worth another go on the next poll; anything IG actually said is not
+      st.state = 'armed'; st.note = `Last attempt failed: ${String(e.message || e)}`;
+      persist();
+    }
+    renderOpen();
+    if (chartState) renderChartPanel();
+  }
+
+  function armStopDialog(dealId) {
+    const p = (S.positions || []).find(x => x.dealId === dealId);
+    if (!p) return;
+    const existing = softStops()[dealId];
+    const dp = p.cur != null && Math.abs(p.cur) < 10 ? 5 : p.cur != null && Math.abs(p.cur) < 1000 ? 3 : 2;
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay open';
+    wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><div><h3>App stop on ${esc(p.market || p.epic)}</h3>
+          <p>Watches the price here and sends a close order when it is reached.</p></div>
+          <button class="btn ghost icon sm" data-x aria-label="Close">${I.x}</button></div>
+        <div class="modal-body">
+          <div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <div>This only works while this tab is open and online. It cannot protect you overnight,
+            on a sleeping machine, or against a gap straight through the level. Keep a broker stop
+            as your real protection.</div></div>
+          <div class="kv" style="margin-top:12px"><span>Now</span><b class="num">${p.cur != null ? p.cur : '—'}</b></div>
+          <div class="kv"><span>Direction</span><b>${p.long ? 'Long — closes when the bid falls to your level' : 'Short — closes when the offer rises to your level'}</b></div>
+          <div class="kv"><span>IG stop</span><b class="num">${p.stopLevel ?? 'none set'}</b></div>
+          <div class="field" style="margin-top:14px"><label for="ss-price">Close at</label>
+            <input type="number" id="ss-price" step="any" value="${existing ? existing.price : ''}" placeholder="${p.cur != null ? p.cur : 'price'}" autocomplete="off"></div>
+          <div class="help" id="ss-dist"></div>
+          ${closeTokenValue() ? '' : '<div class="notice" style="margin-top:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>No close token is saved, so this stop could arm but never fire. Save one in Settings first.</div></div>'}
+          <div class="err" id="ss-err" style="margin-top:10px"></div>
+        </div>
+        <div class="modal-foot">
+          ${existing ? '<button class="btn ghost danger" data-disarm>Remove stop</button>' : ''}
+          <div class="right"><button class="btn ghost" data-x>Cancel</button>
+          <button class="btn primary" data-arm>${existing ? 'Update' : 'Arm stop'}</button></div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const done = () => wrap.remove();
+    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
+    const input = wrap.querySelector('#ss-price'), err = wrap.querySelector('#ss-err'), dist = wrap.querySelector('#ss-dist');
+    const describe = () => {
+      const v = parseFloat(input.value);
+      if (!isFinite(v) || p.cur == null) { dist.textContent = ''; return; }
+      const away = Math.abs(p.cur - v), wrongSide = p.long ? v >= p.cur : v <= p.cur;
+      dist.innerHTML = wrongSide
+        ? `<span class="loss">That is on the wrong side of the price — it would fire immediately.</span>`
+        : `${away.toFixed(dp)} away${p.unit ? ` · about ${money(away * p.unit * p.size)} at risk` : ''}`;
+    };
+    input.addEventListener('input', describe); describe();
+    setTimeout(() => input.focus(), 30);
+    const disarm = wrap.querySelector('[data-disarm]');
+    if (disarm) disarm.addEventListener('click', () => { delete softStops()[dealId]; persist(); done(); renderOpen(); if (chartState) renderChartPanel(); toast('App stop removed.'); });
+    wrap.querySelector('[data-arm]').addEventListener('click', () => {
+      const v = parseFloat(input.value);
+      if (!isFinite(v) || v <= 0) { err.textContent = 'Enter the price to close at.'; return; }
+      if (p.cur != null && (p.long ? v >= p.cur : v <= p.cur)) { err.textContent = 'That level is already through the price — it would fire straight away.'; return; }
+      softStops()[dealId] = { price: v, dir: p.direction, size: p.size, epic: p.epic || '', market: p.market || '',
+                              key: (existing && existing.key) || newKey(), state: 'armed', armedAt: new Date().toISOString() };
+      persist(); done(); renderOpen(); if (chartState) renderChartPanel(); startAuto();
+      toast(`App stop armed at ${v}. It works only while this tab is open.`, 8000);
+    });
+  }
+
   function ordersCard() {
     if (S.ordError) return `<div class="card"><div class="card-head"><div class="card-title">Pending orders</div><span class="live bad">Error</span></div><div class="card-body dim" style="font-size:12px">${esc(S.ordError)}</div></div>`;
     const rows = S.orders;
@@ -3856,6 +3988,8 @@ if (typeof module !== 'undefined') module.exports = AN;
           levelLines: { lines: [
             { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
             { value: p.stopLevel, label: 'stop', color: cssVar('--loss'), dash: [5, 4] },
+            // the app-side stop is drawn apart from IG's so the two are never confused
+            ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price, label: 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
             { value: p.limitLevel, label: 'target', color: cssVar('--profit'), dash: [5, 4] },
             { value: p.cur, label: 'now', color: cssVar('--accent'), text: cssVar('--accent-text'), width: 1.5 },
           ] },
@@ -3924,11 +4058,24 @@ if (typeof module !== 'undefined') module.exports = AN;
             <td class="r num ${p.locked != null ? 'profit' : 'muted'}"${p.locked != null ? ' title="The stop sits beyond entry, so this position cannot lose — that is locked in, not at risk."' : ''}>${p.risk != null ? moneyIn(p.risk, p.ccy) : p.locked != null ? '+' + moneyIn(p.locked, p.ccy) : '—'}</td>
             <td class="r num ${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</td>
             <td class="r num ${cls(p.pnl)}" style="font-weight:600">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</td>
-            <td class="act r">${S.settings.syncUrl ? `<button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
+            <td class="act r">${S.settings.syncUrl ? `${(() => { const st = softStops()[p.dealId];
+                const cls = !st ? 'ghost' : st.state === 'armed' ? 'ghost armed' : st.state === 'firing' ? 'ghost armed' : 'ghost danger';
+                const label = !st ? 'Stop' : st.state === 'firing' ? 'firing…' : st.state === 'error' ? 'stop failed' : st.state === 'unconfirmed' ? 'unconfirmed' : `stop ${st.price}`;
+                const title = st && st.note ? esc(st.note) : 'Set an app-side stop: this tab watches the price and closes the position when it is reached';
+                return `<button class="btn ${cls} sm" data-softstop="${esc(p.dealId)}" title="${title}">${esc(label)}</button>`; })()}
+              <button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
         ${converted.length ? `<div class="dim" style="font-size:11px;margin-top:10px">${plural(converted.length, 'row')} converted into ${acct} using the rate you set (${converted.map(c => `1 ${c.converted.from} = ${c.converted.rate}`).filter((v, i, a) => a.indexOf(v) === i).join(', ')}). Change it in Settings.</div>` : ''}
         ${foreign.length ? `<div class="dim" style="font-size:11px;margin-top:10px">${plural(foreign.length, 'row')} left out of the totals because no exchange rate is set for ${Array.from(new Set(foreign.map(f => String(f.ccy).toUpperCase()))).join(', ')}. <button class="btn ghost sm" data-act="settings">Set a rate</button></div>` : ''}
         ${approx ? `<div class="dim" style="font-size:11px;margin-top:10px">Rows marked <b>approx</b> have no closed trades behind them yet, so the value per point comes from IG's contract size. Those figures are shown in the instrument's own currency${acct ? `, not ${acct}` : ''}, and are left out of the totals above. Once one closes, the figure becomes exact and converts automatically.</div>` : ''}
+        ${(() => {
+          const stops = Object.entries(softStops()).filter(([id]) => rows.some(r => r.dealId === id));
+          if (!stops.length) return '';
+          const bad = stops.filter(([, st]) => st.state === 'error' || st.state === 'unconfirmed');
+          const live = stops.filter(([, st]) => st.state === 'armed' || st.state === 'firing');
+          return (bad.length ? `<div class="notice" style="margin-top:10px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${bad.map(([, st]) => `<b>${esc(st.market || 'Position')}</b>: ${esc(st.note || 'the app stop did not complete')}`).join('<br>')}</div></div>` : '')
+            + (live.length ? `<div class="dim" style="font-size:11px;margin-top:8px">${plural(live.length, 'app stop')} armed. <b>They only work while this tab is open and online</b> — a closed tab, a sleeping machine or a gap through the level means no stop. Keep a broker stop as the real protection.</div>` : '');
+        })()}
         <div class="dim" style="font-size:11px;margin-top:8px">These are mark-to-market snapshots, not outcomes. They never touch your win rate, expectancy, R-multiples or equity curve.</div>
       </div></div>` + ordersCard();
       restore();
@@ -4035,6 +4182,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         if (gone) runSync(true);
       }
       lastOpenIds = ids;
+      checkSoftStops();       // before anything renders, so a hit acts on this tick
       fetchOrders();          // rate-limited internally
     } catch (err) {
       S.posError = String(err.message || err); pollFails++;
@@ -4073,7 +4221,10 @@ if (typeof module !== 'undefined') module.exports = AN;
   function schedulePoll() {
     clearTimeout(pollTimer);
     if (RO || !S.settings.autoSync || !S.settings.syncUrl) return;
-    if (document.hidden) return;                                   // nothing to watch in a hidden tab
+    // A hidden tab normally has nothing worth watching — unless a stop is armed, in which case
+    // stopping would quietly disarm it. Browsers throttle background timers to about once a
+    // minute, so it keeps working but coarsely; that limit is stated wherever a stop is armed.
+    if (document.hidden && !anyArmed()) return;
     const idle = S.positions && S.positions.length === 0;           // nothing open: check occasionally
     const wait = idle ? Math.max(15000, pollInterval()) : pollInterval();
     pollTimer = setTimeout(async () => { await fetchPositions(); schedulePoll(); }, wait);
@@ -4086,7 +4237,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (Date.now() - lastFullSync > 5 * 60 * 1000) runSync(true);   // safety net for fees and cash rows
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) clearTimeout(pollTimer);
+    if (document.hidden) { if (!anyArmed()) clearTimeout(pollTimer); }
     else startAuto();                                              // catch up on returning to the tab
   });
 
@@ -4547,6 +4698,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (ch) openChart(ch.dataset.chart);
     const cl = e.target.closest('[data-close]');
     if (cl) confirmClose(cl.dataset.close);
+    const ss = e.target.closest('[data-softstop]'); if (ss && !RO) armStopDialog(ss.dataset.softstop);
     const del = e.target.closest('[data-del]'); if (del && !RO) { S.trades = S.trades.filter(t => t.id !== del.dataset.del); persist(); renderAll(); toast('Trade deleted.'); }
   });
   $$('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) closeModals(); }));

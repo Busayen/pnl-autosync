@@ -18,6 +18,7 @@ Live: <https://busayen.github.io/pnl-autosync/>
 - [Getting your data in](#getting-your-data-in)
 - [The five sections](#the-five-sections)
 - [Concepts worth understanding](#concepts-worth-understanding)
+- [App-side stops](#app-side-stops)
 - [Settings reference](#settings-reference)
 - [Optional: automatic sync with IG](#optional-automatic-sync-with-ig)
 - [Privacy and security](#privacy-and-security)
@@ -160,6 +161,30 @@ roughly 57–93%. The interval is the finding; the point estimate is not.
 
 There is no fixed daily loss limit, because with guaranteed stops the deposit *is* the limit.
 Instead the app reports how much of each session's capital was consumed at its worst point.
+
+---
+
+## App-side stops
+
+IG refuses a stop closer than its own minimum distance from the price. **Stop** on an open position
+sets one here instead: the tab watches the price and sends the same close order the Close button
+sends when your level is reached.
+
+Understand what it is not. It runs **in this browser tab**, so it cannot act when the tab is shut,
+the machine is asleep, the network is down, or the market gaps straight through the level. A
+background tab keeps watching but browsers throttle it to roughly once a minute, so the fill can be
+well past your level. It sends a market order, so it slips like any other.
+
+It is a convenience on top of a broker stop, **never a replacement for one**.
+
+Practicalities:
+
+- It needs a **close token saved in Settings**, or it can arm but never fire. The dialog says so.
+- The idempotency key is minted when you arm and reused on every attempt, so a retry after a
+  timeout cannot become a second close.
+- If IG **rejects** the close it is reported and not retried. If IG **does not confirm**, it stops
+  and tells you to check the IG app — the order may have filled.
+- Closing the position any other way removes the stop.
 
 ---
 
