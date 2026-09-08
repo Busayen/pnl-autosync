@@ -7,7 +7,7 @@ heatmap calendar, R-multiples, session analysis, risk-rule adherence and confide
 
 No build step. No server. No account. Open the file and it works.
 
-Live: <https://busayen.github.io/pnl/>
+Live: <https://busayen.github.io/pnl-autosync/>
 
 ---
 
@@ -18,10 +18,12 @@ Live: <https://busayen.github.io/pnl/>
 - [Getting your data in](#getting-your-data-in)
 - [The five sections](#the-five-sections)
 - [Concepts worth understanding](#concepts-worth-understanding)
+- [App-side stops](#app-side-stops)
 - [Settings reference](#settings-reference)
 - [Optional: automatic sync with IG](#optional-automatic-sync-with-ig)
 - [Privacy and security](#privacy-and-security)
 - [Hosting your own copy](#hosting-your-own-copy)
+- [Testing](#testing)
 - [How it is built](#how-it-is-built)
 - [Adapting it to another broker](#adapting-it-to-another-broker)
 - [Limitations](#limitations)
@@ -48,7 +50,7 @@ It runs entirely in your browser. Data is stored in `localStorage` and never upl
 
 ## Quick start
 
-1. Open <https://busayen.github.io/pnl/> (or your own copy).
+1. Open <https://busayen.github.io/pnl-autosync/> (or your own copy).
 2. Click **Load demo trades** to see everything populated.
 3. When you are ready, **Import** your own broker CSV.
 
@@ -162,6 +164,43 @@ Instead the app reports how much of each session's capital was consumed at its w
 
 ---
 
+## App-side stops
+
+IG refuses a stop closer than its own minimum distance from the price. **Stop** on an open position
+sets one here instead: the tab watches the price and sends the same close order the Close button
+sends when your level is reached.
+
+Understand what it is not. It runs **in this browser tab**, so it cannot act when the tab is shut,
+the machine is asleep, the network is down, or the market gaps straight through the level. A
+background tab keeps watching but browsers throttle it to roughly once a minute, so the fill can be
+well past your level. It sends a market order, so it slips like any other.
+
+It is a convenience on top of a broker stop, **never a replacement for one**.
+
+### Fixed or trailing
+
+A **fixed** stop sits at the price you name. A **trailing** one sits a distance behind the best
+price the tab has seen and ratchets one way only — up for a long, down for a short — never giving
+ground.
+
+Trailing is the weaker of the two, for a reason worth understanding. A fixed stop only suffers
+detection lag: the level is known, so the error is however far price travels past it between polls.
+A trailing stop also *derives* its level from the highest price it has observed, and polling can
+only ever see a high at or below the real one. So the anchor sits low and the detection is late,
+and the two compound. An app-side trail is therefore always looser than a broker's, never tighter.
+The armed panel shows the anchor it is working from, so you can see what it has actually seen.
+
+Practicalities:
+
+- It needs a **close token saved in Settings**, or it can arm but never fire. The dialog says so.
+- The idempotency key is minted when you arm and reused on every attempt, so a retry after a
+  timeout cannot become a second close.
+- If IG **rejects** the close it is reported and not retried. If IG **does not confirm**, it stops
+  and tells you to check the IG app — the order may have filled.
+- Closing the position any other way removes the stop.
+
+---
+
 ## Settings reference
 
 | Setting | Effect |
@@ -259,8 +298,14 @@ Settings → **IG sync worker URL** (no trailing `/sync`), **Sync token**, **Syn
 ## Privacy and security
 
 - Everything runs client-side. Trades live in `localStorage` and are never uploaded.
-- The page makes **no external requests**. Chart.js and html2canvas are inlined rather than pulled
-  from a CDN, partly so that nothing third-party executes on a page that may hold a sync token.
+- The page makes **no external requests** by default. Chart.js and html2canvas are inlined rather
+  than pulled from a CDN, partly so that nothing third-party executes on a page that may hold a
+  sync token.
+- The one exception is opt-in: the **TV** button on a position chart embeds TradingView. It is off
+  until you press it, and it loads in a cross-origin `<iframe>` — TradingView runs on its own
+  origin and cannot read the sync or close token this page keeps in `localStorage`. Its prices come
+  from a different feed than IG's, so the two charts will not agree tick for tick. Leave it off if
+  you would rather the page stay entirely self-contained.
 - `localStorage` is scoped to the **origin**, not the path. Anything else you host under the same
   domain can read this data. Do not host untrusted code there.
 - **Never commit** your exports, `ledger-backup-*.json`, or a read-only snapshot — those contain
@@ -290,6 +335,23 @@ GitHub Pages, free:
 
 Any static host works — Netlify, Cloudflare Pages, an S3 bucket, or just opening the file locally.
 There is no build step because there is nothing to build.
+
+---
+
+## Testing
+
+Two harnesses drive a real Chromium against the file.
+
+```sh
+npm i -D playwright && npx playwright install chromium
+node test/stress.js      # parsing, injection, exports, layout, palette, storage, a11y
+node test/live.js        # positions, orders, closing, FX, the candle chart on desktop and phone
+```
+
+`live.js` stands up a mock IG worker on the page's own origin, so the fetch/render/close/chart
+path is exercised end to end without touching a real account. Both take an optional path
+argument, exit non-zero on failure and name each one. Worth running against any new version
+before publishing it.
 
 ---
 
