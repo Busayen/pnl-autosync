@@ -255,6 +255,65 @@ Practicalities:
 
 ---
 
+## Averaging ladder
+
+A planned, bounded scale-in. Arm it on an open position and it adds to that position as it goes
+against you, on a fixed schedule, with every entry sharing one broker stop.
+
+The schedule is three entries: the position you already have, one at 0.2R against you at 1.5&times;
+the size, and one at 0.5R against you at 2.25&times;. R is the position's own risk — the distance
+from its entry to its broker stop — so a rung "at 0.2R" is a fifth of the way to that stop.
+
+**Read this table before using it.** Adding to a loser inverts your risk:
+
+| Entry | Goes on at | Size | Loses at the shared stop |
+|---|---|---|---|
+| the position | already on | 1.00x | 1.000R |
+| rung 1 | −0.2R | 1.50x | 1.200R |
+| rung 2 | −0.5R | 2.25x | 1.125R |
+| | | **4.75x** | **3.325R** |
+
+A position risking £100 becomes a ladder risking £332.50. The average entry ends up 0.3R below the
+original, so a small bounce takes the whole stack green — and the stop, when it comes, costs 3.3
+times what the position alone would have. On those numbers the ladder has to be right **77.8%** of
+the time to break even against a +0.2R exit. That is the trade. It is not a way of being right more
+often; it is a way of being wrong more expensively, less often.
+
+### What holds it
+
+The cap is on **money, not rungs**. A rung count silently means whatever the scaling makes it mean;
+a money cap means what it says. You type the most you are willing to lose, and before every entry
+the ladder recomputes what the stack would lose at the shared stop — counting rungs already filled
+at the price they *actually* filled, not the price that was planned. A rung that would push it past
+the cap does not go on, and the ladder stops there and says so.
+
+That last detail matters after a gap. If price jumps through a trigger the rung fills well past it,
+which makes the stack cost more at the stop than the plan said. The cap sees the real fills, so a
+bad fill brings the ladder up against it sooner.
+
+### The rest of the guardrails
+
+- **Every rung carries a broker stop** aimed at the shared level, so the stack is protected with
+  this tab shut. Adding needs the tab open, which fails safe: a closed tab means no more entries,
+  never an unguarded stack. IG measures a stop from the fill, so rungs land near the shared price,
+  not exactly on it.
+- **No broker stop on the position, no ladder.** There is no R to measure against and no shared
+  level to put underneath. The dialog refuses to arm.
+- **No value per point, no ladder** either — the money cap could not be computed, and a ladder
+  without that cap is not one this app will arm.
+- **One rung per poll**, each with an idempotency key fixed to that rung, so a retry after a
+  timeout cannot become a second entry.
+- **Any rejection stops the whole ladder.** It does not retry into a moving market. An unconfirmed
+  entry stops it too, and tells you to check the IG app.
+- It uses the same `ORDER_TOKEN` as the order ticket. Without one, a rung comes due and nothing is
+  sent — the ladder errors rather than half-running.
+- Removing a ladder leaves any entries it already placed alone. They are ordinary positions.
+
+The last rung sits 0.5R from its stop. If that is inside IG's minimum stop distance for the market,
+the entry is refused and the ladder stops there.
+
+---
+
 ## The chart
 
 Click a symbol in the open positions table to chart it. Candles come from IG once per timeframe per
@@ -277,6 +336,7 @@ screen — most of a pane's worth of empty space to plan into, and more the furt
 | Scroll over the chart | Zoom time around the pointer |
 | Scroll over the price scale (or hold Shift) | Zoom price |
 | Drag the chart | Pan both axes; a flick coasts |
+| Sideways scroll or two-finger swipe | Pan time. Never handed to the page, so it cannot scroll the screen out from under you |
 | Drag the price or time scale | Stretch that axis |
 | Double-click | Back to the default window |
 | Pinch | Zoom both axes |

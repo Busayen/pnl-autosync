@@ -362,6 +362,20 @@ async function candleChart(browser, viewport, touch) {
       return ev.defaultPrevented;
     });
     check('desktop: the chart stops eating scroll at full zoom-out', (await swallowed()) === false);
+    // A sideways swipe pans time and is never handed to the page: horizontal page scroll over a
+    // chart is always an accident, and at the pan limit it used to take the whole screen with it.
+    const sideways = async () => page.evaluate(() => {
+      const cv = document.querySelector('#c-pos');
+      const ch = Chart.getChart(cv), a = ch.chartArea, r = cv.getBoundingClientRect();
+      const before = window.__chart().x.min;
+      const ev = new WheelEvent('wheel', { deltaX: 180, deltaY: 0, cancelable: true, bubbles: true,
+        clientX: r.left + (a.left + a.right) / 2, clientY: r.top + (a.top + a.bottom) / 2 });
+      cv.dispatchEvent(ev);
+      return { swallowed: ev.defaultPrevented, moved: window.__chart().x.min - before };
+    });
+    const sw = await sideways();
+    check('desktop: a sideways swipe pans instead of scrolling the page', sw.swallowed === true, JSON.stringify(sw));
+    check('desktop: and it actually moves the window', sw.moved > 0, `min moved ${sw.moved}`);
     await page.evaluate(() => document.querySelector('[data-zoom="fit"]')?.click());
     await page.waitForTimeout(350);
     check('desktop: but it does take the wheel while there is room to zoom', (await swallowed()) === true);
@@ -999,6 +1013,160 @@ async function livePartialBar(browser) {
   await page.context().close();
 }
 
+// The averaging ladder opens positions on its own, which nothing else in this app does. Every
+// check here is about it refusing to: not before its trigger, not twice in a tick, not past the
+// money cap, not after a rejection, and not at all without the risk being acknowledged.
+// Geometry under test: size 1 at 5000, stop 4900, so R = 100 points and unit = 1.
+//   rung 1 at -0.2R = 4980, size 1.5, loses 1.5 x 80  = 120
+//   rung 2 at -0.5R = 4950, size 2.25, loses 2.25 x 50 = 112.5
+//   seed                                loses 1 x 100  = 100   -> 332.5 all in
+async function averagingLadder(browser) {
+  const pos = (bid, offer, extra) => ({ orders: [], orderBody: { dealStatus: 'ACCEPTED', dealId: 'NEW1' }, ...(extra || {}),
+    positions: [{ dealId: 'D1', epic: 'E1', market: 'US 500', direction: 'BUY', size: 1, level: 5000,
+      bid, offer, stopLevel: 4900, contractSize: 1, currency: 'USD', ...((extra || {}).pos || {}) }] });
+  const openDlg = async pg => { await pg.evaluate(() => document.querySelector('[data-ladder]')?.click()); await pg.waitForTimeout(450); };
+  const txt = (pg, sel) => pg.evaluate(s => (document.querySelector(s) || {}).innerText || '', sel);
+  const led = pg => pg.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).settings.ladders || {}).D1 || null);
+  const since = n => calls.slice(n).filter(c => c.p === '/order').map(c => JSON.parse(c.body));
+  const armIt = async (pg, cap) => {
+    await pg.fill('#ld-cap', String(cap));
+    await pg.evaluate(() => { document.querySelector('#ld-ok').checked = true; });
+    const tok = await pg.$('#ld-tok');
+    if (tok) await pg.fill('#ld-tok', 'ORDERTOK');
+    await pg.evaluate(() => document.querySelector('[data-arm]').click());
+    await pg.waitForTimeout(500);
+  };
+
+  state = pos(5010, 5011);
+  const { page, errs } = await openPage(browser);
+  await openDlg(page);
+  const dlg = await txt(page, '#ld-modal');
+  check('the dialog states what the finished ladder risks', /332\.5/.test(dlg), dlg.slice(0, 120));
+  check('and contrasts it with the position on its own', /100/.test(dlg));
+  check('it lists both rungs with their trigger prices', /4980/.test(dlg) && /4950/.test(dlg));
+  check('and their scaled sizes', /1\.5/.test(dlg) && /2\.25/.test(dlg));
+
+  await page.evaluate(() => { document.querySelector('#ld-cap').value = '400'; });
+  await page.evaluate(() => document.querySelector('[data-arm]').click());
+  await page.waitForTimeout(300);
+  check('it will not arm until the risk is acknowledged',
+    /confirm/i.test(await txt(page, '#ld-err')) && !(await led(page)), await txt(page, '#ld-err'));
+
+  await armIt(page, 400);
+  const armed = await led(page);
+  check('arming stores the ladder', !!armed && armed.state === 'armed', JSON.stringify(armed && armed.state));
+  check('with the cap that was typed', !!armed && armed.maxRisk === 400);
+  check('and no rungs filled yet', !!armed && armed.rungs.length === 0);
+
+  let n = calls.length;
+  state.positions[0].bid = 4990; state.positions[0].offer = 4991;
+  await page.waitForTimeout(3000);
+  check('it does not add before its trigger', since(n).length === 0, JSON.stringify(since(n)));
+
+  n = calls.length;
+  state.positions[0].bid = 4978; state.positions[0].offer = 4979;
+  await page.waitForTimeout(3200);
+  const r1 = since(n);
+  check('crossing -0.2R adds one rung', r1.length === 1, JSON.stringify(r1));
+  check('scaled 1.5x off the seed', r1[0] && r1[0].size === 1.5, r1[0] && String(r1[0].size));
+  check('in the same direction as the position', r1[0] && r1[0].direction === 'BUY');
+  check('as a market order', r1[0] && r1[0].orderType === 'MARKET');
+  check('carrying a broker stop aimed at the shared level',
+    r1[0] && Math.abs(r1[0].stopDistance - 78) <= 2, r1[0] && `stopDistance ${r1[0].stopDistance}`);
+  check('with an idempotency key fixed to that rung', r1[0] && /:r0$/.test(r1[0].idempotencyKey), r1[0] && r1[0].idempotencyKey);
+  check('the ladder records the fill', ((await led(page)) || {}).rungs.length === 1);
+
+  n = calls.length;
+  await page.waitForTimeout(3000);
+  check('and it does not add again at the same price', since(n).length === 0, JSON.stringify(since(n)));
+
+  n = calls.length;
+  state.positions[0].bid = 4948; state.positions[0].offer = 4949;
+  await page.waitForTimeout(3200);
+  const r2 = since(n);
+  check('crossing -0.5R adds the last rung', r2.length === 1 && r2[0].size === 2.25, JSON.stringify(r2));
+  const doneL = await led(page);
+  check('the ladder is then finished', !!doneL && doneL.state === 'done', doneL && doneL.state);
+
+  n = calls.length;
+  state.positions[0].bid = 4910; state.positions[0].offer = 4911;
+  await page.waitForTimeout(3000);
+  check('a finished ladder adds nothing more', since(n).length === 0, JSON.stringify(since(n)));
+  check('no page errors running a ladder', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+
+  // The cap is the point of the whole feature: 100 + 120 = 220 is inside 250, 332.5 is not.
+  state = pos(5010, 5011);
+  const { page: p2 } = await openPage(browser);
+  await openDlg(p2); await armIt(p2, 250);
+  let m = calls.length;
+  state.positions[0].bid = 4978; state.positions[0].offer = 4979;
+  await p2.waitForTimeout(3200);
+  check('a rung inside the cap goes on', since(m).length === 1, JSON.stringify(since(m)));
+  m = calls.length;
+  state.positions[0].bid = 4948; state.positions[0].offer = 4949;
+  await p2.waitForTimeout(3400);
+  check('the rung that would breach the cap does not', since(m).length === 0, JSON.stringify(since(m)));
+  const capped = await led(p2);
+  check('and the ladder stops there, saying so', !!capped && capped.state === 'capped', capped && capped.state);
+  check('the note names the cap', !!capped && /cap/i.test(capped.note || ''), capped && capped.note);
+  await p2.context().close();
+
+  // One rung per tick, even when price gaps straight past both triggers.
+  state = pos(5010, 5011);
+  const { page: p3 } = await openPage(browser);
+  await openDlg(p3); await armIt(p3, 400);
+  let g = calls.length;
+  state.positions[0].bid = 4930; state.positions[0].offer = 4931;
+  await p3.waitForTimeout(2600);
+  const gapped = since(g);
+  // Both rungs are due, so both go on — one per tick, each exactly once. What protects you when
+  // they fill 50 points from their triggers is the cap, which counts the real fills.
+  check('a gap past both triggers fills each rung exactly once',
+    gapped.length === 2 && new Set(gapped.map(o => o.idempotencyKey)).size === 2,
+    JSON.stringify(gapped.map(o => o.idempotencyKey)));
+  check('and each keeps its own scaled size',
+    gapped.length === 2 && gapped[0].size === 1.5 && gapped[1].size === 2.25,
+    JSON.stringify(gapped.map(o => o.size)));
+  await p3.waitForTimeout(3200);
+  check('and nothing is added after that', since(g).length === 2, `${since(g).length} orders`);
+  await p3.context().close();
+
+  // A rejected entry stops the ladder rather than retrying into a moving market.
+  state = pos(5010, 5011, { orderBody: { dealStatus: 'REJECTED', reason: 'MARKET_CLOSED' } });
+  const { page: p4 } = await openPage(browser);
+  await openDlg(p4); await armIt(p4, 400);
+  let e = calls.length;
+  state.positions[0].bid = 4978; state.positions[0].offer = 4979;
+  await p4.waitForTimeout(3200);
+  check('a rejected rung is not retried', since(e).length === 1, `${since(e).length} attempts`);
+  await p4.waitForTimeout(3200);
+  check('still not retried a tick later', since(e).length === 1, `${since(e).length} attempts`);
+  const bad = await led(p4);
+  check('and the ladder is left in an error state', !!bad && bad.state === 'error', bad && bad.state);
+  check('naming what IG said', !!bad && /MARKET_CLOSED/.test(bad.note || ''), bad && bad.note);
+  await p4.context().close();
+
+  // No broker stop means no R to measure against and no shared level to put underneath.
+  state = pos(5010, 5011, { pos: { stopLevel: null } });
+  const { page: p5 } = await openPage(browser);
+  await openDlg(p5);
+  check('without a broker stop the ladder refuses to arm',
+    /no broker stop/i.test(await txt(p5, '#ld-modal')) &&
+    !(await p5.evaluate(() => !!document.querySelector('[data-arm]'))), await txt(p5, '#ld-modal'));
+  await p5.context().close();
+
+  // A position that has gone takes its ladder with it.
+  state = pos(5010, 5011);
+  const { page: p6 } = await openPage(browser);
+  await openDlg(p6); await armIt(p6, 400);
+  check('the ladder is stored', !!(await led(p6)));
+  state.positions = [];
+  await p6.waitForTimeout(3200);
+  check('closing the position removes its ladder', !(await led(p6)));
+  await p6.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1015,6 +1183,7 @@ async function livePartialBar(browser) {
       ['drawing tools', drawingTools],
       ['app-side stops', appSideStops], ['trailing stops', trailingStops],
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
+      ['averaging ladder', averagingLadder],
       ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;

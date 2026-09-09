@@ -243,6 +243,7 @@ td .del:hover { color: var(--loss); background: var(--loss-soft); }
 .modal { width: 100%; max-width: 480px; max-height: calc(100vh - 40px); display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); animation: pop .22s cubic-bezier(.2,.8,.2,1); }
 .modal.wide { max-width: 560px; }
 .modal.ticket { max-width: min(1180px, calc(100vw - 32px)); }
+#ld-modal { max-width: min(680px, calc(100vw - 32px)); }
 .ticket-row { flex: 1 1 auto; display: flex; gap: 0; align-items: stretch; min-height: 0; }
 .ticket-chart { flex: 1 1 58%; min-width: 0; border-right: 1px solid var(--border); overflow: auto; padding-bottom: 8px; }
 .ticket-chart .card.chart { border: 0; background: transparent; box-shadow: none; margin: 0; }
@@ -1022,6 +1023,8 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 #chartpanel .chart-hint { font-size: 10.5px; color: var(--text-3); padding: 0 16px 10px; }
 #chartpanel canvas:active { cursor: grabbing; }
 
+.check { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; color: var(--text-2); cursor: pointer; line-height: 1.45; }
+.check input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--loss); flex: none; cursor: pointer; }
 .indctl { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; }
 .chartrow { display: flex; align-items: stretch; gap: 0; }
 .chartcol { flex: 1 1 auto; min-width: 0; }
@@ -3637,6 +3640,248 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     return out;
   }
+  // ---- averaging ladder ----
+  // A planned, bounded scale-in. When a position runs against you by a fraction of its own risk,
+  // this adds to it on a fixed schedule, with every entry sharing one broker stop.
+  //
+  // The number that matters is not the one people expect. The seed position risks 1R. If all three
+  // entries fill and that shared stop is hit, the stack loses 3.325R — adding to a loser inverts
+  // your risk, and this is the arithmetic that does it:
+  //
+  //     rung 1   at  0.0R   1.00x size   loses 1.000R at the stop
+  //     rung 2   at -0.2R   1.50x size   loses 1.200R
+  //     rung 3   at -0.5R   2.25x size   loses 1.125R
+  //                         4.75x total  loses 3.325R
+  //
+  // Which is why the cap here is on money, not on rungs: a rung count silently means whatever the
+  // scaling makes it mean, while a money cap means what it says. It is re-tested against live
+  // numbers before every entry, not only when the ladder was armed.
+  //
+  // Each rung carries a broker stop at the shared price, so the stack is protected even with this
+  // tab shut. What needs the tab open is *adding*, and that fails safe: a closed tab means no more
+  // rungs, never an unguarded stack.
+  const LADDER_STEPS = [0.2, 0.5];   // how far against you, in R, each rung goes on
+  const LADDER_SCALE = 1.5;          // each rung is this much of the one before it
+  // what the finished ladder loses at the shared stop, in units of the seed's own risk: 3.325
+  const LADDER_LOSS_R = [0, ...LADDER_STEPS].reduce((sum, at, k) => sum + Math.pow(LADDER_SCALE, k) * (1 - at), 0);
+  const ladders = () => (S.settings.ladders = S.settings.ladders || {});
+  const armedLadder = id => { const l = ladders()[id]; return l && (l.state === 'armed' || l.state === 'firing') ? l : null; };
+  const anyLadder = () => Object.keys(ladders()).some(id => armedLadder(id));
+
+  // Everything derives from the seed's own risk: R is the distance from its entry to its broker
+  // stop, so a rung "at 0.2R" sits a fifth of the way to that stop. With no broker stop there is
+  // no R and no shared level to put underneath, so there is no ladder.
+  function ladderPlan(p) {
+    if (!p || p.level == null || p.stopLevel == null) return null;
+    const entry = Number(p.level), stopPrice = Number(p.stopLevel);
+    const rPrice = Math.abs(entry - stopPrice);
+    if (!isFinite(rPrice) || rPrice <= 0) return null;
+    // a stop on the wrong side of the entry is a locked-in profit, not a risk, and the ladder's
+    // whole geometry assumes the stop is the losing side
+    if (p.long ? stopPrice >= entry : stopPrice <= entry) return null;
+    const rungs = LADDER_STEPS.map((at, i) => ({
+      i, at,
+      price: round6(p.long ? entry - at * rPrice : entry + at * rPrice),
+      size: Math.round(p.size * Math.pow(LADDER_SCALE, i + 1) * 100) / 100,
+    }));
+    const totalSize = Math.round((p.size + rungs.reduce((a, r) => a + r.size, 0)) * 100) / 100;
+    return { entry, stopPrice, rPrice, rungs, totalSize, unit: p.unit || null };
+  }
+  const round6 = v => Math.round(v * 1e6) / 1e6;
+
+  // What the whole stack loses at the shared stop if it stops adding after `upTo`. Rungs already
+  // filled count at the price they actually filled; the rest at the price that would trigger them.
+  function ladderRisk(p, L, plan, upTo) {
+    if (!plan || !plan.unit) return null;
+    let pts = p.size * Math.abs(plan.entry - plan.stopPrice);
+    for (const r of plan.rungs) {
+      if (upTo && r.i > upTo.i) continue;
+      const filled = (L && L.rungs || []).find(x => x.i === r.i);
+      const at = filled && filled.price != null ? filled.price : r.price;
+      pts += (filled ? filled.size : r.size) * Math.abs(at - plan.stopPrice);
+    }
+    return pts * plan.unit;
+  }
+
+  function checkLadders() {
+    if (!Array.isArray(S.positions)) return;
+    const all = ladders();
+    const live = new Set(S.positions.map(x => x.dealId));
+    let dirty = false;
+    // a position that has gone takes its ladder with it
+    for (const id of Object.keys(all)) if (!live.has(id)) { delete all[id]; dirty = true; }
+    for (const p of S.positions) {
+      const L = all[p.dealId];
+      if (!L || L.state !== 'armed' || p.cur == null) continue;
+      const plan = ladderPlan(p);
+      if (!plan) {
+        L.state = 'error';
+        L.note = 'The position no longer has a usable broker stop, so the ladder has nothing to anchor to.';
+        dirty = true; continue;
+      }
+      const next = plan.rungs.find(r => !L.rungs.some(x => x.i === r.i));
+      if (!next) { L.state = 'done'; dirty = true; continue; }
+      // how far it has gone against you, in the seed's own R
+      const adverse = (p.long ? plan.entry - p.cur : p.cur - plan.entry) / plan.rPrice;
+      if (adverse < next.at) continue;
+      if (dirty) persist();
+      fireLadderRung(p, L, plan, next);
+      return;                        // one rung per tick, never two in the same breath
+    }
+    if (dirty) persist();
+  }
+
+  async function fireLadderRung(p, L, plan, rung) {
+    const stop = (state, note, ms = 15000) => {
+      L.state = state; L.note = note; persist(); renderOpen();
+      if (chartState) renderChartPanel();
+      toast(`Ladder on ${p.market || p.epic}: ${note}`, ms);
+    };
+    const tok = orderTokenValue();
+    if (!tok) return stop('error', 'a rung came due but no order token is saved, so nothing was sent. Save one in Settings.');
+
+    // The cap is tested against live numbers here, not just at arming: the broker stop may have
+    // been moved since, which changes every rung's contribution.
+    const projected = ladderRisk(p, L, plan, rung);
+    if (projected == null) return stop('error', 'no value per point is known for this instrument, so the money at risk cannot be checked. Nothing was sent.');
+    if (L.maxRisk != null && projected > L.maxRisk) {
+      return stop('capped', `stopped at ${L.rungs.length + 1} of ${plan.rungs.length + 1} entries — the next one would put ${money(projected)} at risk, past the ${money(L.maxRisk)} cap.`, 12000);
+    }
+
+    L.state = 'firing'; persist(); renderOpen();
+    // IG measures a stop from the fill, which is not known until it fills, so this lands the rung's
+    // stop as close to the shared price as the spread and slippage allow — not exactly on it.
+    const stopDistance = Math.round(Math.abs(p.cur - plan.stopPrice) * 100) / 100;
+    try {
+      const res = await fetch(`${syncBase()}/order`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        // fixed per rung, so a retry after a timeout cannot become a second entry
+        body: JSON.stringify({ epic: p.epic, direction: p.direction, size: rung.size,
+          orderType: 'MARKET', stopDistance, idempotencyKey: `${L.key}:r${rung.i}` }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      if (data.dealStatus === 'ACCEPTED') {
+        L.rungs.push({ i: rung.i, at: rung.at, size: rung.size,
+                       price: data.level != null ? Number(data.level) : p.cur,
+                       dealId: data.dealId || null, filledAt: new Date().toISOString() });
+        const left = plan.rungs.length - L.rungs.length;
+        L.state = left ? 'armed' : 'done';
+        L.note = left ? null : 'every rung filled; the stack now rides its shared stop.';
+        persist(); renderOpen();
+        if (chartState) renderChartPanel();
+        toast(`Ladder added ${rung.size} to ${p.market || p.epic} at ${data.level ?? p.cur}. `
+          + `${L.rungs.length} of ${plan.rungs.length} rungs filled, ${money(ladderRisk(p, L, plan, null))} now at risk.`, 10000);
+        fetchPositions(); runSync(true);
+      } else if (data.dealStatus === 'UNCONFIRMED') {
+        // it may well have gone on; adding again could double the rung
+        stop('unconfirmed', data.reason || 'IG did not confirm the entry. Check the IG app before doing anything else.', 20000);
+      } else {
+        stop('error', `IG rejected the entry — ${data.reason || data.dealStatus}. The ladder has stopped.`);
+      }
+    } catch (e) {
+      // A ladder that retries into a moving market is how one bad tick becomes four entries.
+      stop('error', `the add failed and the ladder has stopped — ${String(e.message || e)}`);
+    }
+  }
+
+  function ladderDialog(dealId) {
+    const p = (S.positions || []).find(x => x.dealId === dealId);
+    if (!p) return;
+    const existing = ladders()[dealId];
+    const plan = ladderPlan(p);
+    const dp = p.cur != null && Math.abs(p.cur) < 10 ? 5 : p.cur != null && Math.abs(p.cur) < 1000 ? 3 : 2;
+    const full = plan ? ladderRisk(p, null, plan, null) : null;
+    const seedRisk = plan && plan.unit ? p.size * plan.rPrice * plan.unit : null;
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay open';
+    const blocked = !plan ? 'This position has no broker stop on the losing side, so there is no R to measure rungs against and no shared level to put under them. Set a stop on IG first.'
+      : !plan.unit ? 'No value per point is known for this instrument, so the money at risk cannot be computed — and a ladder without that cap is not one this app will arm.'
+      : !syncBase() ? 'Placing orders needs the IG sync worker.' : '';
+    wrap.innerHTML = `<div class="modal wide" id="ld-modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><div><h3>Averaging ladder on ${esc(p.market || p.epic)}</h3>
+          <p>Adds to this position as it goes against you, on a fixed schedule, under one shared stop.</p></div>
+          <button class="btn ghost icon sm" data-x aria-label="Close">${I.x}</button></div>
+        <div class="modal-body">
+          <div class="notice"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <div>Adding to a losing position inverts your risk. This position risks
+            <b>${seedRisk != null ? money(seedRisk) : '—'}</b>; the finished ladder risks
+            <b class="loss">${full != null ? money(full) : '—'}</b> — ${LADDER_LOSS_R.toFixed(2)}&times; as much, on
+            ${plan ? plan.totalSize : '—'} of size instead of ${p.size}. It wins more often than the position alone
+            and loses far more when it loses. The cap below is what holds that, and it is checked before every entry.</div></div>
+          ${blocked ? `<div class="notice" style="margin-top:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(blocked)}</div></div>` : `
+          <div class="tbl-wrap" style="margin-top:14px"><table><thead><tr><th>Entry</th><th>Goes on at</th><th class="r">Price</th><th class="r">Size</th><th class="r">At the stop</th></tr></thead><tbody>
+            ${[{ i: -1, at: 0, price: plan.entry, size: p.size }, ...plan.rungs].map(r => {
+              const filled = r.i >= 0 && existing && (existing.rungs || []).some(x => x.i === r.i);
+              return `<tr><td>${r.i < 0 ? 'the position' : `rung ${r.i + 1}`}${filled ? ' <span class="tag">filled</span>' : ''}</td>
+                <td class="num muted">${r.i < 0 ? 'already on' : `−${r.at}R`}</td>
+                <td class="r num">${r.price.toFixed(dp)}</td>
+                <td class="r num">${r.size}</td>
+                <td class="r num loss">${money(r.size * Math.abs(r.price - plan.stopPrice) * plan.unit)}</td></tr>`;
+            }).join('')}
+            <tr><td colspan="3"><b>All three, at the shared stop of ${plan.stopPrice}</b></td>
+              <td class="r num"><b>${plan.totalSize}</b></td><td class="r num loss"><b>${money(full)}</b></td></tr>
+          </tbody></table></div>
+          <div class="field full" style="margin-top:14px"><label for="ld-cap">Most you are willing to lose on this ladder</label>
+            <input type="number" id="ld-cap" step="any" min="0" value="${existing && existing.maxRisk != null ? existing.maxRisk : Math.ceil(full)}" autocomplete="off">
+            <div class="help">Checked before every entry against live numbers. A rung that would push the stack past this does not go on, and the ladder stops there.</div></div>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="ld-ok">
+            <span>I understand the finished ladder risks ${money(full)}, not ${seedRisk != null ? money(seedRisk) : '—'}.</span></label>
+          ${orderTokenValue() ? '' : `<div class="field full" style="margin-top:12px"><label for="ld-tok">Order token</label>
+            <input type="password" id="ld-tok" placeholder="the ORDER_TOKEN set on your worker" autocomplete="off">
+            <div class="help">Held for this browser session only. Without it a rung comes due and nothing is sent.</div></div>`}
+          <div class="help" style="margin-top:12px">A rung fills where the market is when its trigger is crossed, which after a gap
+            can be well past it — the cap counts the prices you actually got, not the ones planned, so a bad fill brings the ladder
+            up against it sooner. Rungs go on as market orders, each with a broker stop aimed at ${plan.stopPrice},
+            so the stack is protected with this tab shut. Adding needs the tab open, which fails safe — a closed tab means no more entries.
+            The last rung sits ${(plan.rPrice * (1 - LADDER_STEPS[LADDER_STEPS.length - 1])).toFixed(dp)} points from its stop; if that is inside
+            IG's minimum distance for this market it will be refused, and the ladder stops there.</div>
+          <div class="err" id="ld-err" style="margin-top:10px"></div>`}
+        </div>
+        <div class="modal-foot">
+          ${existing ? '<button class="btn ghost danger" data-disarm>Remove ladder</button>' : ''}
+          <div class="right"><button class="btn ghost" data-x>Cancel</button>
+          ${blocked ? '' : `<button class="btn primary" data-arm>${existing ? 'Update' : 'Arm ladder'}</button>`}</div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const done = () => wrap.remove();
+    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
+    const disarm = wrap.querySelector('[data-disarm]');
+    if (disarm) disarm.addEventListener('click', () => {
+      delete ladders()[dealId]; persist(); done(); renderOpen();
+      if (chartState) renderChartPanel();
+      toast('Ladder removed. Entries already filled are untouched — they are ordinary positions now.', 9000);
+    });
+    const arm = wrap.querySelector('[data-arm]');
+    if (arm) arm.addEventListener('click', () => {
+      const err = wrap.querySelector('#ld-err');
+      const cap = parseFloat(wrap.querySelector('#ld-cap').value);
+      if (!isFinite(cap) || cap <= 0) { err.textContent = 'Enter the most you are willing to lose.'; return; }
+      if (!wrap.querySelector('#ld-ok').checked) { err.textContent = 'Tick the box to confirm what the finished ladder risks.'; return; }
+      const tokField = wrap.querySelector('#ld-tok');
+      const tok = orderTokenValue() || (tokField ? tokField.value.trim() : '');
+      if (!tok) { err.textContent = 'Enter your order token, or a rung will come due and nothing will be sent.'; return; }
+      if (!orderTokenValue()) sessionOrderToken = tok;
+      if (cap < full) {
+        // Not refused: a cap below the full plan is a deliberate choice to run a shorter ladder.
+        const reach = [{ i: -1 }, ...plan.rungs].filter(r => r.i < 0 || ladderRisk(p, null, plan, r) <= cap).length;
+        if (reach < 2) { err.textContent = `A cap of ${money(cap)} does not even cover the first rung (${money(ladderRisk(p, null, plan, plan.rungs[0]))}). Raise it or leave the ladder off.`; return; }
+      }
+      ladders()[dealId] = {
+        key: (existing && existing.key) || newKey(),
+        epic: p.epic || '', market: p.market || '', direction: p.direction,
+        entry: plan.entry, stopPrice: plan.stopPrice, baseSize: p.size,
+        steps: LADDER_STEPS.slice(), scale: LADDER_SCALE, maxRisk: cap,
+        rungs: (existing && existing.rungs) || [], state: 'armed', note: null,
+        armedAt: new Date().toISOString(),
+      };
+      persist(); done(); renderOpen(); startAuto();
+      if (chartState) renderChartPanel();
+      toast(`Ladder armed on ${p.market || p.epic}: up to ${plan.rungs.length} more entries, capped at ${money(cap)}. It only adds while this tab is open.`, 10000);
+    });
+  }
+
   const INDICATORS = [
     { k: 'ema20', label: 'EMA 20', fn: r => ema(r.map(c => c.c), 20), color: () => '#f59e0b' },
     { k: 'ema50', label: 'EMA 50', fn: r => ema(r.map(c => c.c), 50), color: () => '#3b82f6' },
@@ -4509,6 +4754,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (!chartState) return;
       stopGlide();
       const pos = at(ev); if (!pos) return;
+      if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) {
+        const span = chartState.x.max - chartState.x.min;
+        panX(ev.deltaX / Math.max(1, pos.plotW) * span);
+        ev.preventDefault();
+        return;
+      }
       const mag = Math.min(150, Math.abs(ev.deltaY) || 100) / 150;
       const factor = ev.deltaY > 0 ? 1 + 0.10 * mag : 1 / (1 + 0.10 * mag);
       // Over the price scale the wheel stretches price; anywhere else it stretches time. Shift
@@ -4765,6 +5016,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       // the app-side stop is drawn apart from IG's so the two are never confused
       ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price,
           label: softStops()[p.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
+      // an armed ladder draws the rungs still to come, so the plan is visible against the price
+      ...(() => { const L = ladders()[p.dealId], plan = L ? ladderPlan(p) : null;
+        if (!plan || !L || (L.state !== 'armed' && L.state !== 'firing')) return [];
+        return plan.rungs.filter(r => !L.rungs.some(x => x.i === r.i))
+          .map(r => ({ value: r.price, label: `rung ${r.i + 1} · ${r.size}`, color: '#c084fc', dash: [3, 3] }));
+      })(),
       { value: p.limitLevel, label: 'target', color: up, dash: [5, 4] },
       { value: p.cur, label: 'now', color: accent, text: cssVar('--accent-text'), width: 1.5 },
     ];
@@ -4917,6 +5174,14 @@ if (typeof module !== 'undefined') module.exports = AN;
                 const label = !st ? 'Stop' : st.state === 'firing' ? 'firing…' : st.state === 'error' ? 'stop failed' : st.state === 'unconfirmed' ? 'unconfirmed' : `${st.trail ? 'trail' : 'stop'} ${st.price}`;
                 const title = st && st.note ? esc(st.note) : 'Set an app-side stop: this tab watches the price and closes the position when it is reached';
                 return `<button class="btn ${cls} sm" data-softstop="${esc(p.dealId)}" title="${title}">${esc(label)}</button>`; })()}
+              ${(() => { const L = ladders()[p.dealId];
+                const cls = !L ? 'ghost' : L.state === 'armed' ? 'ghost armed' : L.state === 'firing' ? 'ghost armed' : L.state === 'done' ? 'ghost' : 'ghost danger';
+                const label = !L ? 'Ladder' : L.state === 'firing' ? 'adding…' : L.state === 'error' ? 'ladder failed'
+                  : L.state === 'unconfirmed' ? 'unconfirmed' : L.state === 'capped' ? 'at cap'
+                  : `ladder ${L.rungs.length}/${(L.steps || LADDER_STEPS).length}`;
+                const title = L && L.note ? esc(L.note)
+                  : 'Add to this position on a fixed schedule as it goes against you, under one shared stop and a money cap';
+                return `<button class="btn ${cls} sm" data-ladder="${esc(p.dealId)}" title="${title}">${esc(label)}</button>`; })()}
               <button class="btn ghost sm closebtn" data-close="${esc(p.dealId)}">Close</button>` : ''}</td></tr>`).join('')}
         </tbody></table></div>
         ${converted.length ? `<div class="dim" style="font-size:11px;margin-top:10px">${plural(converted.length, 'row')} converted into ${acct} using the rate you set (${converted.map(c => `1 ${c.converted.from} = ${c.converted.rate}`).filter((v, i, a) => a.indexOf(v) === i).join(', ')}). Change it in Settings.</div>` : ''}
@@ -5039,6 +5304,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       }
       lastOpenIds = ids;
       checkSoftStops();       // before anything renders, so a hit acts on this tick
+      checkLadders();
       fetchOrders();          // rate-limited internally
     } catch (err) {
       S.posError = String(err.message || err); pollFails++;
@@ -5081,7 +5347,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     // A hidden tab normally has nothing worth watching — unless a stop is armed, in which case
     // stopping would quietly disarm it. Browsers throttle background timers to about once a
     // minute, so it keeps working but coarsely; that limit is stated wherever a stop is armed.
-    if (document.hidden && !anyArmed()) return;
+    if (document.hidden && !anyArmed() && !anyLadder()) return;
     const idle = S.positions && S.positions.length === 0;           // nothing open: check occasionally
     const wait = idle ? Math.max(15000, pollInterval()) : pollInterval();
     pollTimer = setTimeout(async () => { await fetchPositions(); schedulePoll(); }, wait);
@@ -5094,7 +5360,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (Date.now() - lastFullSync > 5 * 60 * 1000) runSync(true);   // safety net for fees and cash rows
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { if (!anyArmed()) clearTimeout(pollTimer); }
+    if (document.hidden) { if (!anyArmed() && !anyLadder()) clearTimeout(pollTimer); }
     else startAuto();                                              // catch up on returning to the tab
   });
 
@@ -5558,6 +5824,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (cl) confirmClose(cl.dataset.close);
     if (e.target.closest('[data-neworder]') && !RO) orderDialog();
     const ss = e.target.closest('[data-softstop]'); if (ss && !RO) armStopDialog(ss.dataset.softstop);
+    const ld = e.target.closest('[data-ladder]'); if (ld && !RO) ladderDialog(ld.dataset.ladder);
     const del = e.target.closest('[data-del]'); if (del && !RO) { S.trades = S.trades.filter(t => t.id !== del.dataset.del); persist(); renderAll(); toast('Trade deleted.'); }
   });
   $$('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) closeModals(); }));
