@@ -176,20 +176,26 @@ The instrument field searches by name, not by code. Type `dow mini`, `nasdaq`, `
 can be in any order, and it matches the market name, its common alias, the contract variant and the
 epic itself. Pick a row and the epic goes in.
 
-Two sources, and the difference matters:
+Three sources, in order, and the difference matters:
 
-- **Traded on this account** — pulled from your own positions, working orders and closed trades.
-  These are listed first, tagged, and true by construction: the account has dealt them.
-- **Everything else** — a built-in list of the main index futures (standard and mini) and FX
-  majors. It is a starting point, **not checked against your account**. IG varies epics by region
-  and account type, and its own mini suffix is inconsistent — most are `IFM`, but Dow, DAX and CAC
-  are `IMF`. A wrong epic is refused with a plain error rather than doing anything strange, but it
-  is refused.
+- **Traded on this account** — from your own positions, working orders and closed trades. Listed
+  first, tagged, and true by construction: the account has dealt them.
+- **From IG** — live market search, when your worker offers `GET /markets?q=`. This reaches
+  everything the account can trade, with IG's own instrument type and expiry shown beside each
+  result, which is what actually tells one contract from another. Debounced, cached for five
+  minutes, and it counts against IG's ordinary per-minute request limit, **not** the weekly
+  historical price allowance that candles spend.
+- **The built-in list** — the main index futures (standard and mini) and FX majors, used when live
+  search is unavailable. A starting point, **not checked against your account**. IG varies epics by
+  region and account type, and its own mini suffix is inconsistent: most are `IFM`, but Dow, DAX
+  and CAC are `IMF`. A wrong epic is refused with a plain error rather than doing anything strange,
+  but it is refused.
+
+A worker without the endpoint returns 404, the picker falls back to the built-in list, and it is
+not asked again for the rest of the session. Nothing breaks; you just get twenty markets instead of
+all of them.
 
 You can still paste an epic straight in; the field takes anything.
-
-The proper fix for the second list is a `GET /markets?q=` on the worker wrapping IG's own market
-search, which would make every row verified rather than trusted. That endpoint does not exist yet.
 
 The ticket carries the chart for the instrument on its left, with your entry, stop and target drawn
 on the price as you type them, so you can see the trade before you send it. `TV` adds a TradingView
@@ -214,6 +220,9 @@ bypassed by whatever is calling:
 | `GUARANTEED_STOP` | Defaults to guaranteed stops. `false` places ordinary ones. |
 | `MAX_ORDER_SIZE` | Ceiling on size. |
 | `MAX_RISK_POINTS` | Ceiling on stop distance. |
+
+The worker also wants a `GET /markets?q=` endpoint for instrument search. It is read-only and sits
+behind `SYNC_TOKEN`; without it the order ticket falls back to its built-in list of epics.
 
 The dashboard refuses a size above 10,000 before sending, but that is a typo guard, not a risk
 limit — `MAX_ORDER_SIZE` is the one that counts. The form marks the stop as required because that

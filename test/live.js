@@ -31,6 +31,18 @@ function serve(dir) {
     if (p === '/orders') { calls.push({ p });
       return json(200, { fetched: new Date().toISOString(), orders: state.orders || [] }); }
     if (p === '/sync') { calls.push({ p }); return json(200, { account: 'IG', transactions: [], activity: [] }); }
+    if (p === '/markets') {
+      const q = (new URL(req.url, 'http://x').searchParams.get('q') || '').toLowerCase();
+      calls.push({ p, q });
+      if (state.marketsMissing) { res.writeHead(404); return res.end(); }
+      const all = [
+        { epic: 'IX.D.DOW.IFE.IP', name: 'Wall Street Cash', type: 'INDICES', expiry: 'DFB', status: 'TRADEABLE' },
+        { epic: 'CS.D.GBPJPY.CFD.IP', name: 'GBP/JPY', type: 'CURRENCIES', expiry: '-', status: 'TRADEABLE' },
+        // deliberately absent from the built-in book, so only a live search can reach it
+        { epic: 'IX.D.LIVEONLY.IFE.IP', name: 'Live Only Market', type: 'INDICES', expiry: 'SEP-26', status: 'TRADEABLE' },
+      ];
+      return json(200, { markets: all.filter(m => `${m.name} ${m.epic}`.toLowerCase().includes(q)) });
+    }
     if (p === '/candles') { calls.push({ p });
       const out = []; let px = 5000, seed = 42;
       const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648, seed / 2147483648);
@@ -1196,6 +1208,79 @@ async function averagingLadder(browser) {
   await p6.context().close();
 }
 
+// The built-in book is a fallback. Where the worker offers market search this asks IG, which
+// reaches everything the account can trade instead of twenty guesses — and must degrade quietly
+// to the book on a worker that has not got the endpoint yet.
+async function marketSearch(browser) {
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 1, level: 5000, bid: 5010, offer: 5011, stopLevel: 4900,
+    contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser);
+  const open = async pg => { await pg.evaluate(() => document.querySelector('[data-neworder]')?.click()); await pg.waitForTimeout(400); };
+  const type = (pg, v) => pg.evaluate(t => { const i = document.querySelector('#or-epic');
+    i.focus(); i.value = t; i.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+  const list = pg => pg.evaluate(() => Array.from(document.querySelectorAll('#or-epiclist .epic-row'))
+    .map(r => r.innerText.replace(/\s+/g, ' ').trim()));
+  const groups = pg => pg.evaluate(() => Array.from(document.querySelectorAll('#or-epiclist .epic-group'))
+    .map(g => g.innerText.trim()));
+
+  await open(page);
+  await type(page, 'live only');
+  await page.waitForTimeout(1400);
+  const found = await list(page);
+  check('a market only IG knows about is found', found.some(r => /IX\.D\.LIVEONLY\.IFE\.IP/.test(r)), JSON.stringify(found));
+  // innerText carries the uppercase text-transform, so compare on the words not the casing
+  check('and is labelled as coming from IG',
+    (await groups(page)).some(g => /from ig/i.test(g)), JSON.stringify(await groups(page)));
+  check("IG's own type and expiry are shown, which is what tells contracts apart",
+    found.some(r => /INDICES/.test(r) && /SEP-26/.test(r)), JSON.stringify(found));
+
+  await type(page, 'sptrd');
+  await page.waitForTimeout(1400);
+  const mixed = await list(page);
+  check('an epic the account has traded still comes first', /traded/i.test(mixed[0] || ''), JSON.stringify(mixed.slice(0, 2)));
+
+  await type(page, 'live only');
+  await page.waitForTimeout(1400);
+  await page.evaluate(() => Array.from(document.querySelectorAll('#or-epiclist .epic-row'))
+    .find(r => /LIVEONLY/.test(r.innerText)).dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+  await page.waitForTimeout(500);
+  check('picking a live result fills its epic',
+    (await page.evaluate(() => document.querySelector('#or-epic').value)) === 'IX.D.LIVEONLY.IFE.IP');
+  await page.evaluate(() => { const i = document.querySelector('#or-size'); i.value = '1'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForTimeout(400);
+  check("and the summary names it rather than repeating the code",
+    /Live Only Market/.test(await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || ''));
+
+  const before = calls.filter(c => c.p === '/markets').length;
+  await type(page, 'live only');
+  await page.waitForTimeout(1200);
+  check('a repeated search is served from memory', calls.filter(c => c.p === '/markets').length === before,
+    `${calls.filter(c => c.p === '/markets').length - before} extra calls`);
+  check('no page errors searching markets', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+
+  // A worker without the endpoint must not break the picker, and must be asked only once.
+  state.marketsMissing = true;
+  const { page: p2, errs: e2 } = await openPage(browser);
+  await open(p2);
+  const was = calls.filter(c => c.p === '/markets').length;
+  await type(p2, 'dow mini');
+  await p2.waitForTimeout(1400);
+  const fell = await list(p2);
+  check('without the endpoint it falls back to the built-in list',
+    fell.length === 1 && /IX\.D\.DOW\.IMF\.IP/.test(fell[0]), JSON.stringify(fell));
+  await type(p2, 'nasdaq');
+  await p2.waitForTimeout(1400);
+  check('and the missing endpoint is not asked again',
+    calls.filter(c => c.p === '/markets').length - was === 1,
+    `${calls.filter(c => c.p === '/markets').length - was} calls`);
+  check('the book still works after that', (await list(p2)).length === 2, JSON.stringify(await list(p2)));
+  check('no page errors when the endpoint is absent', e2.length === 0, e2.slice(0, 2).join(' | '));
+  await p2.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1212,7 +1297,7 @@ async function averagingLadder(browser) {
       ['drawing tools', drawingTools],
       ['app-side stops', appSideStops], ['trailing stops', trailingStops],
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
-      ['averaging ladder', averagingLadder],
+      ['averaging ladder', averagingLadder], ['market search', marketSearch],
       ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;

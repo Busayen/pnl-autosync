@@ -3445,10 +3445,12 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   // The name behind an epic, whether it came from the account or the book. Used for the risk
   // estimate and the chart title, both of which read better than a bare code.
+  const liveNames = new Map();        // epic -> name, for anything IG has told us about
   function marketForEpic(epic) {
     if (!epic) return null;
     const k = knownEpics().find(e => e.epic === epic);
     if (k) return k.name;
+    if (liveNames.has(epic)) return liveNames.get(epic);
     for (const m of EPIC_BOOK) {
       const hit = m.epics.find(([, e]) => e === epic);
       if (hit) return m.epics.length > 1 ? `${m.name} ${hit[0].toLowerCase()}` : m.name;
@@ -3456,31 +3458,91 @@ if (typeof module !== 'undefined') module.exports = AN;
     return null;
   }
 
+  // ---- live market search ----
+  // The book above is a fallback, not the plan. When the worker offers /markets this asks IG
+  // directly, which covers everything the account can trade rather than twenty guesses, and is
+  // true rather than trusted. Market search is an ordinary read against IG's per-minute limit; it
+  // does not touch the historical price allowance the way candles do.
+  let marketsEndpoint = 'unknown';        // 'unknown' | 'yes' | 'no' — asked once per session
+  const marketCache = new Map();
+  const MARKET_TTL = 5 * 60 * 1000;
+  async function searchMarkets(q) {
+    const key = String(q || '').trim().toLowerCase();
+    if (key.length < 2 || !syncBase() || marketsEndpoint === 'no') return null;
+    const hit = marketCache.get(key);
+    if (hit && Date.now() - hit.at < MARKET_TTL) return hit.rows;
+    try {
+      const res = await fetch(`${syncBase()}/markets?q=${encodeURIComponent(key)}`,
+        { headers: S.settings.syncToken ? { Authorization: `Bearer ${S.settings.syncToken}` } : {} });
+      // A worker without the endpoint says so once and is not asked again this session.
+      if (res.status === 404 || res.status === 501) { marketsEndpoint = 'no'; return null; }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || data.error) throw new Error((data && data.error) || `HTTP ${res.status}`);
+      marketsEndpoint = 'yes';
+      const rows = (data.markets || []).map(m => ({
+        epic: m.epic, name: m.name || m.instrumentName || m.epic,
+        note: [m.type || m.instrumentType, m.expiry && m.expiry !== '-' ? m.expiry : null].filter(Boolean).join(' · '),
+        variant: '', g: 'From IG', known: false, status: m.status || m.marketStatus || null,
+      })).filter(m => m.epic);
+      for (const r of rows) liveNames.set(r.epic, r.name);
+      marketCache.set(key, { at: Date.now(), rows });
+      if (marketCache.size > 60) for (const [k, v] of marketCache) if (Date.now() - v.at > MARKET_TTL) marketCache.delete(k);
+      return rows;
+    } catch { return null; }             // a failed search falls back to the book, never blocks
+  }
+
   // A combobox rather than a datalist: a datalist filters on the value, so typing "wall street"
   // would match nothing at all when the value is IX.D.DOW.IFE.IP.
   function attachEpicPicker(input, pop, onPick) {
-    let active = -1, rows = [];
+    let active = -1, rows = [], live = [], liveFor = null, busy = false, timer = 0, seq = 0;
     const close = () => { pop.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
-    const paint = () => {
-      rows = epicSearch(input.value).slice(0, 60);
-      if (!rows.length) {
-        pop.innerHTML = `<div class="epic-empty">Nothing matches. You can still paste an epic straight in.</div>`;
-        pop.hidden = false; input.setAttribute('aria-expanded', 'true');
-        return;
-      }
+    // Epics the account has dealt first, because those are certain. Then whatever IG returned for
+    // this query. Then the built-in book, for anything IG did not cover or when it is not reachable.
+    const merged = () => {
+      const q = input.value.trim().toLowerCase();
+      const local = epicSearch(q);
+      const seen = new Set();
+      const out = [];
+      const add = o => { if (!seen.has(o.epic)) { seen.add(o.epic); out.push(o); } };
+      local.filter(o => o.known).forEach(add);
+      if (liveFor === q) live.forEach(add);
+      local.filter(o => !o.known).forEach(add);
+      return out.slice(0, 60);
+    };
+    const render = () => {
+      rows = merged();
       let html = '', group = null;
       rows.forEach((o, i) => {
         if (o.g !== group) { group = o.g; html += `<div class="epic-group">${esc(group)}</div>`; }
         html += `<button type="button" class="epic-row${i === active ? ' on' : ''}" role="option" data-i="${i}" aria-selected="${i === active}">
-            <span class="epic-name">${esc(o.name)}${o.variant ? ` <i>${esc(o.variant)}</i>` : ''}${o.known ? '<span class="tag">traded</span>' : ''}</span>
+            <span class="epic-name">${esc(o.name)}${o.variant ? ` <i>${esc(o.variant)}</i>` : ''}${o.note ? ` <i>${esc(o.note)}</i>` : ''}${o.known ? '<span class="tag">traded</span>' : ''}</span>
             <span class="epic-code">${esc(o.epic)}</span></button>`;
       });
+      if (busy) html += `<div class="epic-empty">Searching IG…</div>`;
+      else if (!rows.length) html += `<div class="epic-empty">Nothing matches. You can still paste an epic straight in.</div>`;
       pop.innerHTML = html;
       pop.hidden = false;
       input.setAttribute('aria-expanded', 'true');
       const on = pop.querySelector('.epic-row.on');
       if (on) on.scrollIntoView({ block: 'nearest' });
     };
+    // Debounced, and every answer checked against the query that is in the box by the time it
+    // lands — otherwise a slow reply for "d" overwrites the results for "dow".
+    const kick = () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2 || marketsEndpoint === 'no' || !syncBase()) return;
+      timer = setTimeout(async () => {
+        const mine = ++seq;
+        busy = true; render();
+        const found = await searchMarkets(q);
+        if (mine !== seq) return;
+        busy = false;
+        if (found) { live = found; liveFor = q.toLowerCase(); }
+        if (!pop.hidden) render();
+      }, 280);
+    };
+    const paint = () => { render(); kick(); };
     const pick = i => {
       const o = rows[i]; if (!o) return;
       input.value = o.epic;
@@ -3494,7 +3556,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
         if (pop.hidden) { paint(); return; }
         active = Math.max(0, Math.min(rows.length - 1, active + (ev.key === 'ArrowDown' ? 1 : -1)));
-        ev.preventDefault(); paint();
+        ev.preventDefault(); render();
         return;
       }
       if (ev.key === 'Enter' && !pop.hidden && active >= 0) { ev.preventDefault(); pick(active); }
@@ -3524,9 +3586,9 @@ if (typeof module !== 'undefined') module.exports = AN;
               <input type="text" id="or-epic" placeholder="Search a market, or paste an IG epic" spellcheck="false"
                      autocomplete="off" role="combobox" aria-expanded="false" aria-controls="or-epiclist" aria-autocomplete="list">
               <div class="epic-pop" id="or-epiclist" role="listbox" aria-label="Instruments" hidden></div>
-              <div class="help" id="or-epichelp">Search by name — &ldquo;dow mini&rdquo;, &ldquo;nasdaq&rdquo;, &ldquo;gbpjpy&rdquo;. Anything this account has traded is listed
-                first and is certain; the rest are a starting list, not checked against your account, and IG refuses a wrong one plainly.
-                Picking a market loads its chart — each new timeframe costs 150 of IG's weekly data points.</div></div>
+              <div class="help" id="or-epichelp">Search by name — &ldquo;dow mini&rdquo;, &ldquo;nasdaq&rdquo;, &ldquo;gbpjpy&rdquo;. Anything this account has traded
+                is listed first and is certain. Where your worker offers market search the rest comes from IG itself; otherwise it falls back to a
+                built-in list that is not checked against your account. Picking a market loads its chart — each new timeframe costs 150 of IG's weekly data points.</div></div>
             <div class="field"><label>Direction</label>
               <span class="tabs" id="or-dir">
                 <button class="tab active" data-dir="BUY">Buy</button><button class="tab" data-dir="SELL">Sell</button></span></div>
