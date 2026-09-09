@@ -244,6 +244,17 @@ td .del:hover { color: var(--loss); background: var(--loss-soft); }
 .modal.wide { max-width: 560px; }
 .modal.ticket { max-width: min(1180px, calc(100vw - 32px)); }
 #ld-modal { max-width: min(680px, calc(100vw - 32px)); }
+.epicfield { position: relative; }
+.epic-pop { position: absolute; z-index: 40; left: 0; right: 0; top: 100%; margin-top: 4px; max-height: 280px; overflow: auto;
+  background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--card-shadow); padding: 4px; }
+.epic-group { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); padding: 8px 8px 4px; }
+.epic-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text); text-align: left; cursor: pointer; font: inherit; font-size: 12.5px; }
+.epic-row:hover, .epic-row.on { background: var(--card-hover); }
+.epic-name i { font-style: normal; color: var(--text-3); }
+.epic-name .tag { margin-left: 6px; }
+.epic-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.epic-empty { padding: 12px 10px; font-size: 12px; color: var(--text-3); }
 .ticket-row { flex: 1 1 auto; display: flex; gap: 0; align-items: stretch; min-height: 0; }
 .ticket-chart { flex: 1 1 58%; min-width: 0; border-right: 1px solid var(--border); overflow: auto; padding-bottom: 8px; }
 .ticket-chart .card.chart { border: 0; background: transparent; box-shadow: none; margin: 0; }
@@ -3371,9 +3382,134 @@ if (typeof module !== 'undefined') module.exports = AN;
     return Array.from(m, ([epic, name]) => ({ epic, name })).sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // ---- instrument catalogue ----
+  // IG epics are unguessable and undiscoverable from the dashboard: the sync worker exposes no
+  // market search, so without this list the only way to place an order on something new is to go
+  // and find its code by hand. These are a starting point, not gospel — they are not checked
+  // against your account, IG varies them by region and account type, and a wrong one is refused
+  // with a plain error rather than doing anything strange. Anything this account has actually
+  // traded is listed above them and is true by construction.
+  //
+  // Note IG's own inconsistency in the mini suffix: most are IFM, but Dow, DAX and CAC are IMF.
+  // That is copied as given rather than tidied, because tidying a code you cannot verify is how
+  // you end up with a picker that looks authoritative and is wrong.
+  const EPIC_BOOK = [
+    { g: 'Index futures', name: 'US 500', note: 'S&P 500', epics: [['Standard', 'IX.D.SPTRD.IFE.IP'], ['Mini', 'IX.D.SPTRD.IFM.IP']] },
+    { g: 'Index futures', name: 'US Tech 100', note: 'Nasdaq 100', epics: [['Standard', 'IX.D.NASDAQ.IFE.IP'], ['Mini', 'IX.D.NASDAQ.IFM.IP']] },
+    { g: 'Index futures', name: 'Wall Street', note: 'Dow Jones', epics: [['Standard', 'IX.D.DOW.IFE.IP'], ['Mini', 'IX.D.DOW.IMF.IP']] },
+    { g: 'Index futures', name: 'US 2000', note: 'Russell 2000', epics: [['Standard', 'IX.D.RUSSELL.IFE.IP'], ['Mini', 'IX.D.RUSSELL.IFM.IP']] },
+    { g: 'Index futures', name: 'UK 100', note: 'FTSE 100', epics: [['Standard', 'IX.D.FTSE.IFE.IP'], ['Mini', 'IX.D.FTSE.IFM.IP']] },
+    { g: 'Index futures', name: 'Germany 40', note: 'DAX 40', epics: [['Standard', 'IX.D.DAX.IFE.IP'], ['Mini', 'IX.D.DAX.IMF.IP']] },
+    { g: 'Index futures', name: 'France 40', note: 'CAC 40', epics: [['Standard', 'IX.D.CAC.IFE.IP'], ['Mini', 'IX.D.CAC.IMF.IP']] },
+    { g: 'Index futures', name: 'Euro Stocks 50', note: 'EURO STOXX 50', epics: [['Standard', 'IX.D.STXE.IFE.IP'], ['Mini', 'IX.D.STXE.IFM.IP']] },
+    { g: 'Index futures', name: 'Japan 225', note: 'Nikkei', epics: [['Standard', 'IX.D.NIKKEI.IFE.IP'], ['Mini', 'IX.D.NIKKEI.IFM.IP']] },
+    { g: 'Index futures', name: 'Australia 200', note: 'ASX 200', epics: [['Standard', 'IX.D.ASX.IFE.IP'], ['Mini', 'IX.D.ASX.IFM.IP']] },
+    { g: 'FX', name: 'EUR/USD', note: 'euro dollar', epics: [['CFD', 'CS.D.EURUSD.CFD.IP']] },
+    { g: 'FX', name: 'GBP/USD', note: 'cable', epics: [['CFD', 'CS.D.GBPUSD.CFD.IP']] },
+    { g: 'FX', name: 'USD/JPY', note: 'dollar yen', epics: [['CFD', 'CS.D.USDJPY.CFD.IP']] },
+    { g: 'FX', name: 'AUD/USD', note: 'aussie', epics: [['CFD', 'CS.D.AUDUSD.CFD.IP']] },
+    { g: 'FX', name: 'USD/CAD', note: 'loonie', epics: [['CFD', 'CS.D.USDCAD.CFD.IP']] },
+    { g: 'FX', name: 'USD/CHF', note: 'swissy', epics: [['CFD', 'CS.D.USDCHF.CFD.IP']] },
+    { g: 'FX', name: 'NZD/USD', note: 'kiwi', epics: [['CFD', 'CS.D.NZDUSD.CFD.IP']] },
+    { g: 'FX', name: 'EUR/GBP', note: '', epics: [['CFD', 'CS.D.EURGBP.CFD.IP']] },
+    { g: 'FX', name: 'EUR/JPY', note: '', epics: [['CFD', 'CS.D.EURJPY.CFD.IP']] },
+    { g: 'FX', name: 'GBP/JPY', note: 'guppy', epics: [['CFD', 'CS.D.GBPJPY.CFD.IP']] },
+  ];
+  const KNOWN_GROUP = 'Traded on this account';
+
+  // What the account has actually touched comes first and is marked, because those epics are true
+  // by construction; the book is a suggestion underneath.
+  function epicOptions() {
+    const seen = new Set();
+    const out = [];
+    for (const e of knownEpics()) {
+      if (seen.has(e.epic)) continue;
+      seen.add(e.epic);
+      out.push({ epic: e.epic, name: e.name, note: '', variant: '', g: KNOWN_GROUP, known: true });
+    }
+    for (const m of EPIC_BOOK) for (const [variant, epic] of m.epics) {
+      if (seen.has(epic)) continue;
+      seen.add(epic);
+      out.push({ epic, name: m.name, note: m.note, variant, g: m.g, known: false });
+    }
+    return out;
+  }
+  // Every word has to land somewhere, so "dow mini" and "mini dow" both find the one row.
+  function epicSearch(q) {
+    const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    return epicOptions().filter(o => {
+      if (!terms.length) return true;
+      const hay = `${o.name} ${o.note} ${o.variant} ${o.epic} ${o.g}`.toLowerCase();
+      return terms.every(t => hay.includes(t));
+    });
+  }
+  // The name behind an epic, whether it came from the account or the book. Used for the risk
+  // estimate and the chart title, both of which read better than a bare code.
+  function marketForEpic(epic) {
+    if (!epic) return null;
+    const k = knownEpics().find(e => e.epic === epic);
+    if (k) return k.name;
+    for (const m of EPIC_BOOK) {
+      const hit = m.epics.find(([, e]) => e === epic);
+      if (hit) return m.epics.length > 1 ? `${m.name} ${hit[0].toLowerCase()}` : m.name;
+    }
+    return null;
+  }
+
+  // A combobox rather than a datalist: a datalist filters on the value, so typing "wall street"
+  // would match nothing at all when the value is IX.D.DOW.IFE.IP.
+  function attachEpicPicker(input, pop, onPick) {
+    let active = -1, rows = [];
+    const close = () => { pop.hidden = true; input.setAttribute('aria-expanded', 'false'); active = -1; };
+    const paint = () => {
+      rows = epicSearch(input.value).slice(0, 60);
+      if (!rows.length) {
+        pop.innerHTML = `<div class="epic-empty">Nothing matches. You can still paste an epic straight in.</div>`;
+        pop.hidden = false; input.setAttribute('aria-expanded', 'true');
+        return;
+      }
+      let html = '', group = null;
+      rows.forEach((o, i) => {
+        if (o.g !== group) { group = o.g; html += `<div class="epic-group">${esc(group)}</div>`; }
+        html += `<button type="button" class="epic-row${i === active ? ' on' : ''}" role="option" data-i="${i}" aria-selected="${i === active}">
+            <span class="epic-name">${esc(o.name)}${o.variant ? ` <i>${esc(o.variant)}</i>` : ''}${o.known ? '<span class="tag">traded</span>' : ''}</span>
+            <span class="epic-code">${esc(o.epic)}</span></button>`;
+      });
+      pop.innerHTML = html;
+      pop.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      const on = pop.querySelector('.epic-row.on');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+    };
+    const pick = i => {
+      const o = rows[i]; if (!o) return;
+      input.value = o.epic;
+      close();
+      onPick(o);
+    };
+    input.addEventListener('focus', paint);
+    input.addEventListener('input', () => { active = -1; paint(); });
+    input.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') { close(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        if (pop.hidden) { paint(); return; }
+        active = Math.max(0, Math.min(rows.length - 1, active + (ev.key === 'ArrowDown' ? 1 : -1)));
+        ev.preventDefault(); paint();
+        return;
+      }
+      if (ev.key === 'Enter' && !pop.hidden && active >= 0) { ev.preventDefault(); pick(active); }
+    });
+    pop.addEventListener('mousedown', ev => {
+      // mousedown, not click: blur would close the list before the click landed
+      const row = ev.target.closest('.epic-row'); if (!row) return;
+      ev.preventDefault();
+      pick(Number(row.dataset.i));
+    });
+    input.addEventListener('blur', () => setTimeout(close, 120));
+  }
+
   function orderDialog() {
     if (!syncBase()) { toast('Placing orders needs the IG sync worker.'); return; }
-    const epics = knownEpics();
     const wrap = document.createElement('div');
     wrap.className = 'overlay open';
     wrap.innerHTML = `<div class="modal ticket" role="dialog" aria-modal="true">
@@ -3384,10 +3520,13 @@ if (typeof module !== 'undefined') module.exports = AN;
         <div class="ticket-form">
         <div class="modal-body">
           <div class="settings-form">
-            <div class="field full"><label for="or-epic">Instrument (IG epic)</label>
-              <input type="text" id="or-epic" list="or-epics" placeholder="e.g. IX.D.SPTRD.IFE.IP" spellcheck="false" autocomplete="off">
-              <datalist id="or-epics">${epics.map(e => `<option value="${esc(e.epic)}">${esc(e.name)}</option>`).join('')}</datalist>
-              <div class="help">${epics.length ? 'Instruments this account has traded are offered above.' : 'No epics known yet — sync or open a position first, or type one.'} Pick one, or press Enter, to load its chart — each new timeframe costs 150 of IG's weekly data points.</div></div>
+            <div class="field full epicfield"><label for="or-epic">Instrument</label>
+              <input type="text" id="or-epic" placeholder="Search a market, or paste an IG epic" spellcheck="false"
+                     autocomplete="off" role="combobox" aria-expanded="false" aria-controls="or-epiclist" aria-autocomplete="list">
+              <div class="epic-pop" id="or-epiclist" role="listbox" aria-label="Instruments" hidden></div>
+              <div class="help" id="or-epichelp">Search by name — &ldquo;dow mini&rdquo;, &ldquo;nasdaq&rdquo;, &ldquo;gbpjpy&rdquo;. Anything this account has traded is listed
+                first and is certain; the rest are a starting list, not checked against your account, and IG refuses a wrong one plainly.
+                Picking a market loads its chart — each new timeframe costs 150 of IG's weekly data points.</div></div>
             <div class="field"><label>Direction</label>
               <span class="tabs" id="or-dir">
                 <button class="tab active" data-dir="BUY">Buy</button><button class="tab" data-dir="SELL">Sell</button></span></div>
@@ -3441,7 +3580,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     let shownEpic = null;
     function buildPreview() {
       const epic = q('or-epic').value.trim();
-      const known = epics.find(e => e.epic === epic);
+      const name = marketForEpic(epic);
       const held = (S.positions || []).find(x => x.epic === epic);
       const size = parseFloat(q('or-size').value), level = parseFloat(q('or-level').value);
       const stopD = parseFloat(q('or-stop').value), limD = parseFloat(q('or-limit').value);
@@ -3451,10 +3590,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       const isLimit = type === 'LIMIT' && isFinite(level) && level > 0;
       const entry = isLimit ? level : cur;
       const long = dir === 'BUY';
-      const unit = known ? pointValueFor(known.name, epic) : null;
+      const unit = pointValueFor(name || '', epic);
       const at = (d, sign) => entry != null && isFinite(d) && d > 0
         ? Math.round((long === (sign > 0) ? entry + d : entry - d) * 1e6) / 1e6 : null;
-      return { preview: true, dealId: '__order', epic, market: known ? known.name : epic, long,
+      return { preview: true, dealId: '__order', epic, market: name || epic, long,
         size: isFinite(size) && size > 0 ? size : null,
         level: isLimit ? level : null, cur: cur != null ? cur : null,
         stopLevel: at(stopD, -1), limitLevel: at(limD, 1),
@@ -3512,20 +3651,23 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (type === 'LIMIT' && (!isFinite(level) || level <= 0)) {
         summary.textContent = 'A limit order needs the price to fill at.'; send.disabled = true; return;
       }
-      const known = epics.find(e => e.epic === epic);
-      const unit = known ? pointValueFor(known.name, epic) : null;
+      const name = marketForEpic(epic);
+      const unit = pointValueFor(name || '', epic);
       const risk = unit && isFinite(stop) && stop > 0 ? ` Risking about <b>${money(stop * unit * size)}</b> if the stop is hit.`
         : (isFinite(stop) && stop > 0 ? '' : ' <b class="loss">No stop.</b> The worker refuses this unless it is set to allow it.');
-      summary.innerHTML = `<b>${dir === 'BUY' ? 'Buy' : 'Sell'} ${size}</b> of <b>${esc(known ? known.name : epic)}</b> `
+      summary.innerHTML = `<b>${dir === 'BUY' ? 'Buy' : 'Sell'} ${size}</b> of <b>${esc(name || epic)}</b> `
         + (type === 'MARKET' ? 'at the market price, now.' : `only if it trades at <b>${level}</b>.`)
         + risk + (unit ? '' : ' <span class="dim">No value-per-point known for this instrument, so no risk estimate.</span>');
       send.disabled = false;
     }
     ['or-size', 'or-level', 'or-stop', 'or-limit'].forEach(id =>
       q(id).addEventListener('input', () => { describe(); refreshPreview(); }));
+    attachEpicPicker(q('or-epic'), q('or-epiclist'), () => { describe(); loadChartFor(); });
     q('or-epic').addEventListener('input', () => {
       describe();
-      if (epics.some(e => e.epic === q('or-epic').value.trim())) loadChartFor();
+      // A complete epic, typed or pasted, is enough to go and fetch the chart. Anything partial
+      // waits for the field to be committed, so a half-typed code never spends IG's allowance.
+      if (epicOptions().some(o => o.epic === q('or-epic').value.trim())) loadChartFor();
     });
     q('or-epic').addEventListener('change', loadChartFor);
     describe();

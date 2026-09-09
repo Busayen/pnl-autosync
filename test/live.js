@@ -677,8 +677,12 @@ async function placingOrders(browser) {
   await page.evaluate(() => document.querySelector('[data-neworder]')?.click());
   await page.waitForTimeout(400);
   check('it cannot be sent before it is filled in', await page.evaluate(() => document.querySelector('[data-send]')?.disabled) === true);
-  check('epics the account has traded are offered',
-    (await page.evaluate(() => Array.from(document.querySelectorAll('#or-epics option')).map(o => o.value))).includes('IX.D.SPTRD.IFE.IP'));
+  check('epics the account has traded are offered', await page.evaluate(() => {
+    const i = document.querySelector('#or-epic');
+    i.focus(); i.dispatchEvent(new Event('input', { bubbles: true }));
+    return Array.from(document.querySelectorAll('#or-epiclist .epic-row'))
+      .some(r => /IX\.D\.SPTRD\.IFE\.IP/.test(r.innerText));
+  }));
   await page.fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
   await page.fill('#or-size', '2');
   await page.waitForTimeout(300);
@@ -962,6 +966,31 @@ async function ticketChart(browser) {
   await page.waitForTimeout(300);
   check('a sane size is allowed again',
     !(await page.evaluate(() => document.querySelector('[data-send]').disabled)));
+
+  // The instrument picker: search by market name, not by a code nobody remembers.
+  await fill('#or-epic', 'dow mini');
+  await page.waitForTimeout(350);
+  const hits = await page.evaluate(() => Array.from(document.querySelectorAll('#or-epiclist .epic-row'))
+    .map(r => r.innerText.replace(/\s+/g, ' ').trim()));
+  check('searching a market name finds its epic', hits.length === 1 && /IX\.D\.DOW\.IMF\.IP/.test(hits[0]), JSON.stringify(hits));
+  check('and the words can be in any order',
+    (await page.evaluate(() => { const i = document.querySelector('#or-epic');
+      i.value = 'mini dow'; i.dispatchEvent(new Event('input', { bubbles: true }));
+      return document.querySelectorAll('#or-epiclist .epic-row').length; })) === 1);
+  await page.evaluate(() => document.querySelector('#or-epiclist .epic-row').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+  await page.waitForTimeout(2600);
+  check('picking one fills the epic in', (await page.evaluate(() => document.querySelector('#or-epic').value)) === 'IX.D.DOW.IMF.IP');
+  check('and names the market rather than the code in the summary',
+    /Wall Street/i.test(await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#or-summary') || {}).innerText || ''));
+  check('epics this account has traded are listed first and marked',
+    await page.evaluate(() => { const i = document.querySelector('#or-epic');
+      i.value = 'SPTRD'; i.dispatchEvent(new Event('input', { bubbles: true }));
+      const first = document.querySelector('#or-epiclist .epic-row');
+      const group = document.querySelector('#or-epiclist .epic-group');
+      return !!first && /traded/i.test(first.innerText) && /account/i.test(group.innerText); }));
+  await fill('#or-epic', 'IX.D.SPTRD.IFE.IP');
+  await page.waitForTimeout(2200);
 
   await page.evaluate(() => document.querySelector('.modal.ticket [data-x]').click());
   await page.waitForTimeout(700);

@@ -170,6 +170,27 @@ Instead the app reports how much of each session's capital was consumed at its w
 **New order** on the Open section opens a position on IG: **Market** fills now, **Limit** rests
 until the price trades at your level. Both take an optional stop and target distance.
 
+### Finding the instrument
+
+The instrument field searches by name, not by code. Type `dow mini`, `nasdaq`, `gbpjpy` — the words
+can be in any order, and it matches the market name, its common alias, the contract variant and the
+epic itself. Pick a row and the epic goes in.
+
+Two sources, and the difference matters:
+
+- **Traded on this account** — pulled from your own positions, working orders and closed trades.
+  These are listed first, tagged, and true by construction: the account has dealt them.
+- **Everything else** — a built-in list of the main index futures (standard and mini) and FX
+  majors. It is a starting point, **not checked against your account**. IG varies epics by region
+  and account type, and its own mini suffix is inconsistent — most are `IFM`, but Dow, DAX and CAC
+  are `IMF`. A wrong epic is refused with a plain error rather than doing anything strange, but it
+  is refused.
+
+You can still paste an epic straight in; the field takes anything.
+
+The proper fix for the second list is a `GET /markets?q=` on the worker wrapping IG's own market
+search, which would make every row verified rather than trusted. That endpoint does not exist yet.
+
 The ticket carries the chart for the instrument on its left, with your entry, stop and target drawn
 on the price as you type them, so you can see the trade before you send it. `TV` adds a TradingView
 chart under it. Naming an instrument is what loads the chart — each new timeframe costs 150 of IG's
