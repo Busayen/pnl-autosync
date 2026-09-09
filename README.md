@@ -11,6 +11,9 @@ Live: <https://busayen.github.io/pnl-autosync/>
 
 ---
 
+The version the page is running is shown in Settings and on hover over the Ledger mark, so
+"is the copy online the current one?" is answerable from the page rather than from a commit log.
+
 ## Contents
 
 - [What it does](#what-it-does)

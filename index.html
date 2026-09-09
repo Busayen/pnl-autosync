@@ -1108,7 +1108,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 <body>
   <div class="ro-banner hidden" id="ro-banner"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span></span></div>
   <header class="nav">
-    <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></span>Ledger</div>
+    <div class="brand" id="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></span>Ledger</div>
     <nav class="subnav" id="subnav"></nav>
     <div class="nav-actions">
       <button class="btn ghost icon" data-act="cmd" title="Command palette (⌘K)" aria-label="Command palette"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg></button>
@@ -2331,7 +2331,11 @@ if (typeof module !== 'undefined') module.exports = AN;
   const SRC = '<!doctype html>\n' + document.documentElement.outerHTML; // captured before any render, used for snapshots
   const RO = !!window.__SNAPSHOT__;
   const C = CORE;
+  // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
+  // from the page itself rather than by reading a commit log.
+  const APP_VERSION = 'v9.0.1';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
+  { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const I = {
     x: '<svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
@@ -5715,7 +5719,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       ? `<div class="help" style="margin-bottom:6px">${plural(files.length, 'file')} loaded, covering ${m ? m.matched : 0} of ${m ? m.total : 0} trades.</div>` + files.map((f, i) => `<div class="li" style="padding:7px 0"><span>${esc(f.name)}</span><button class="btn ghost sm" data-actfile="${i}">Remove</button></div>`).join('')
       : '<div class="help">None loaded. Import IG\'s Activity History export to unlock risk and R-multiples.</div>';
     $$('#s-actfiles [data-actfile]').forEach(b => b.addEventListener('click', () => { const l = actList(); l.splice(+b.dataset.actfile, 1); S.activity = l; applyActivity(); persist(); renderAll(); openSettings(); toast('Activity file removed.'); }));
-    $('#s-storage').textContent = store.ok ? 'Data is saved in this browser automatically.' : 'This browser blocks local storage, so nothing persists between visits. Download a backup before closing.';
+    $('#s-storage').textContent = (store.ok ? 'Data is saved in this browser automatically.' : 'This browser blocks local storage, so nothing persists between visits. Download a backup before closing.')
+      + ` · ${APP_VERSION}`;
     openModal('m-settings');
   }
   function saveSettings() {

@@ -75,6 +75,14 @@ async function boot(browser) {
     const len = (await page.$eval('#dash', e => e.innerText)).length;
     check(`renders: ${s}`, len > 200, `${len} chars of text`);
   }
+  // The page has to be able to answer "is the version online the current one?" on its own.
+  const brand = await page.evaluate(() => (document.getElementById('brand') || {}).title || '');
+  check('the build is named on the brand', /^Ledger v\d+\.\d+\.\d+$/.test(brand), brand);
+  await page.evaluate(() => document.querySelector('[data-act="settings"]')?.click());
+  await page.waitForTimeout(400);
+  const line = await page.evaluate(() => (document.querySelector('#s-storage') || {}).textContent || '');
+  check('and again in Settings', /v\d+\.\d+\.\d+/.test(line), line);
+  check('the two agree', (brand.match(/v[\d.]+/) || [])[0] === (line.match(/v[\d.]+/) || [])[1 - 1], `${brand} / ${line}`);
   check('no console errors on boot', logs.length === 0, logs.slice(0, 3).join(' | '));
   await ctx.close();
 }
