@@ -258,8 +258,15 @@ Practicalities:
 ## The chart
 
 Click a symbol in the open positions table to chart it. Candles come from IG once per timeframe per
-session and are cached; the bar in progress is built from the position feed, which is already
-running and costs nothing.
+session and are cached; the bar in progress is driven by the position feed, which is already running
+and costs nothing.
+
+IG stamps a bar with the start of its interval and hands back the one still forming, so its newest
+candle is usually a partial. Because candles are bought once, that partial would otherwise sit
+frozen until the interval rolled. The chart takes it over instead — keeping the open, high and low
+IG has already recorded for the interval, and moving the close with the live price — so the newest
+candle grows the way it does on a real charting package. It updates as fast as the position poll,
+so a couple of seconds, not tick by tick.
 
 The time axis is a fractional index rather than a category, so it pans on parts of a candle rather
 than jumping one at a time, and it scrolls forward until only a couple of candles are left on

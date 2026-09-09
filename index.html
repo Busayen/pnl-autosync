@@ -3783,7 +3783,15 @@ if (typeof module !== 'undefined') module.exports = AN;
   const candleMs = c => { const t = String(c && c.t || ''); const d = new Date(t.length === 19 ? t + 'Z' : t); return d.getTime(); };
   const isoUtc = ms => new Date(ms).toISOString().slice(0, 19);
   // history plus the bar in progress — what the chart actually draws
-  const chartRows = () => !chartState ? [] : (chartState.candles || []).concat(chartState.live ? [chartState.live] : []);
+  const chartRows = () => {
+    if (!chartState) return [];
+    const rows = chartState.candles || [], live = chartState.live;
+    if (!live) return rows;
+    const lastMs = rows.length ? candleMs(rows[rows.length - 1]) : NaN;
+    // The live bar either takes over IG's own bar for the same interval, or follows the last
+    // closed one. Appending in the first case would draw the interval twice.
+    return lastMs === live.bucket ? rows.slice(0, -1).concat(live) : rows.concat(live);
+  };
 
   function tickLiveCandle() {
     if (!chartState || !(chartState.candles || []).length) return false;
@@ -3795,9 +3803,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     const px = isFinite(bid) && isFinite(offer) ? (bid + offer) / 2 : isFinite(bid) ? bid : isFinite(offer) ? offer : NaN;
     if (!isFinite(px)) return false;
     const bucket = Math.floor(Date.now() / step) * step;
-    const lastMs = candleMs(chartState.candles[chartState.candles.length - 1]);
-    // once IG publishes the interval its own candle wins; ours only covers what is still open
-    if (isFinite(lastMs) && bucket <= lastMs) { if (!chartState.live) return false; chartState.live = null; return true; }
+    const rows = chartState.candles, last = rows[rows.length - 1];
+    const lastMs = candleMs(last);
+    if (!isFinite(lastMs)) return false;
+    // IG stamps a bar with the START of its interval and returns the one still in progress, so its
+    // newest bar is normally the current bucket rather than a closed one. Standing aside for it
+    // froze the chart on a half-formed candle, because candles are bought once per timeframe and
+    // that bar is never fetched again. Ours takes it over instead and keeps it moving.
+    if (bucket < lastMs) { if (!chartState.live) return false; chartState.live = null; return true; }
     const live = chartState.live;
     if (live && live.bucket === bucket) {
       if (px > live.h) live.h = px;
@@ -3806,12 +3819,17 @@ if (typeof module !== 'undefined') module.exports = AN;
       live.c = px;
       return true;
     }
-    // a fresh interval: open at the price the last one closed, so the series has no gap
-    const prevClose = live ? live.c : chartState.candles[chartState.candles.length - 1].c;
-    chartState.live = { bucket, t: isoUtc(bucket), o: isFinite(prevClose) ? prevClose : px,
-                        h: Math.max(px, prevClose || px), l: Math.min(px, prevClose || px), c: px, v: null, forming: true };
-    // keep up with the right edge only if the view was already pinned there
-    if (chartState.x && chartState.x.max >= chartState.candles.length - 1) {
+    // Seeded from IG's own partial bar when there is one, so the open and the range already traded
+    // this interval survive; otherwise the interval opens where the last one closed.
+    const seed = lastMs === bucket ? last : null;
+    const prevClose = live ? live.c : last.c;
+    const o = seed ? seed.o : (isFinite(prevClose) ? prevClose : px);
+    chartState.live = { bucket, t: isoUtc(bucket), o,
+                        h: Math.max(px, o, seed ? seed.h : px), l: Math.min(px, o, seed ? seed.l : px),
+                        c: px, v: seed ? seed.v : null, forming: true };
+    // Taking IG's bar over keeps the row count the same; appending one shifts everything along, so
+    // only then does the view need nudging to stay pinned to the right edge.
+    if (!seed && chartState.x && chartState.x.max >= rows.length - 1) {
       chartState.x = { min: chartState.x.min + 1, max: chartState.x.max + 1 };
     }
     return true;

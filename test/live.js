@@ -36,7 +36,9 @@ function serve(dir) {
       const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648, seed / 2147483648);
       // end the history at the last closed five-minute boundary, so a bar is genuinely forming
       const stepMs = 3e5;
-      const t0 = Math.floor(Date.now() / stepMs) * stepMs - 150 * stepMs;
+      // state.partialBar mirrors what IG really returns: the newest bar is the interval still
+      // open, timestamped with its start.
+      const t0 = Math.floor(Date.now() / stepMs) * stepMs - (state.partialBar ? 149 : 150) * stepMs;
       for (let i = 0; i < 150; i++) {
         const o = px, c = o + (rnd() - 0.47) * 14;
         out.push({ t: new Date(t0 + i * stepMs).toISOString().slice(0, 19), o: +o.toFixed(1),
@@ -955,6 +957,48 @@ async function ticketChart(browser) {
   await page.context().close();
 }
 
+// IG stamps a bar with the START of its interval and hands back the one still in progress, so its
+// newest candle is normally the current bucket, not a closed one. That bar is bought once and
+// never refetched, so if the chart defers to it the last candle is frozen mid-formation.
+async function livePartialBar(browser) {
+  state = { orders: [], partialBar: true, positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP',
+    market: 'US 500', direction: 'BUY', size: 2, level: 5000, bid: 5160, offer: 5161,
+    stopLevel: 4980, contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2400);
+  const bar = () => page.evaluate(() => {
+    const st = window.__chart && window.__chart();
+    if (!st || !st.rows.length) return null;
+    const r = st.rows[st.rows.length - 1];
+    return { bars: st.rows.length, t: r.t, o: r.o, h: r.h, l: r.l, c: r.c, forming: !!r.forming };
+  });
+  const a = await bar();
+  check('the newest bar is the interval still open', !!a && a.forming, JSON.stringify(a));
+  check("it replaces IG's partial bar rather than following it", !!a && a.bars === 150, a && `${a.bars} bars`);
+  // the mock's series is deterministic: IG's partial bar for this interval is o 5160.4 h 5169.3 l 5157.6
+  check("it keeps IG's open for that interval", !!a && Math.abs(a.o - 5160.4) < 0.05, a && `o ${a.o}`);
+  check("IG's high and low for the interval are not lost",
+    !!a && a.h >= 5169.3 && a.l <= 5157.6, a && `h ${a.h} l ${a.l}`);
+  check('and its close is the live price', !!a && Math.abs(a.c - 5160.5) < 0.01, a && `c ${a.c}`);
+
+  state.positions[0].bid = 5175; state.positions[0].offer = 5176;
+  await page.waitForTimeout(3200);
+  const b = await bar();
+  check('it follows the price up', !!b && b.c > a.c, `${a.c} -> ${b && b.c}`);
+  check('its high moves with it', !!b && b.h >= 5175, b && `h ${b.h}`);
+  check('and nothing is appended as it moves', !!b && b.bars === a.bars, `${a.bars} -> ${b && b.bars}`);
+
+  state.positions[0].bid = 5140; state.positions[0].offer = 5141;
+  await page.waitForTimeout(3200);
+  const c = await bar();
+  check('the high holds when price falls back', !!c && c.h >= 5175, c && `h ${c.h}`);
+  check('the low tracks the fall', !!c && c.l <= 5141, c && `l ${c.l}`);
+  check('and the open never drifts once set', !!c && c.o === a.o, `${a.o} -> ${c && c.o}`);
+  check('no page errors over a partial bar', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -967,7 +1011,8 @@ async function ticketChart(browser) {
       ['foreign currency', foreignCurrency], ['IG reference rates', igReferenceRates],
       ['candle chart (desktop)', b => candleChart(b, { width: 1400, height: 900 }, false)],
       ['candle chart (phone)', b => candleChart(b, { width: 390, height: 844 }, true)],
-      ['live bar + TradingView', liveCandleAndTv], ['drawing tools', drawingTools],
+      ['live bar + TradingView', liveCandleAndTv], ['live bar over IG partial', livePartialBar],
+      ['drawing tools', drawingTools],
       ['app-side stops', appSideStops], ['trailing stops', trailingStops],
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
       ['order ticket chart', ticketChart]]) {
