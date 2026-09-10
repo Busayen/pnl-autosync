@@ -2333,7 +2333,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.0.1';
+  const APP_VERSION = 'v9.1.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3939,6 +3939,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (dirty) persist();
   }
 
+  // Shadow mode runs the whole engine and sends nothing: same triggers, same cap, same one rung
+  // per poll, but the rung is only recorded. It is the default on a new ladder, because nothing
+  // here has ever placed an order against a real account and finding out with money is the
+  // expensive way round.
   async function fireLadderRung(p, L, plan, rung) {
     const stop = (state, note, ms = 15000) => {
       L.state = state; L.note = note; persist(); renderOpen();
@@ -3946,7 +3950,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       toast(`Ladder on ${p.market || p.epic}: ${note}`, ms);
     };
     const tok = orderTokenValue();
-    if (!tok) return stop('error', 'a rung came due but no order token is saved, so nothing was sent. Save one in Settings.');
+    if (!L.shadow && !tok) return stop('error', 'a rung came due but no order token is saved, so nothing was sent. Save one in Settings.');
 
     // The cap is tested against live numbers here, not just at arming: the broker stop may have
     // been moved since, which changes every rung's contribution.
@@ -3956,6 +3960,18 @@ if (typeof module !== 'undefined') module.exports = AN;
       return stop('capped', `stopped at ${L.rungs.length + 1} of ${plan.rungs.length + 1} entries — the next one would put ${money(projected)} at risk, past the ${money(L.maxRisk)} cap.`, 12000);
     }
 
+    if (L.shadow) {
+      L.rungs.push({ i: rung.i, at: rung.at, size: rung.size, price: p.cur, dealId: null,
+                     shadow: true, filledAt: new Date().toISOString() });
+      const rest = plan.rungs.length - L.rungs.length;
+      L.state = rest ? 'armed' : 'done';
+      L.note = rest ? null : 'every rung recorded. Nothing was sent — this ladder is in shadow mode.';
+      persist(); renderOpen();
+      if (chartState) renderChartPanel();
+      toast(`Shadow ladder on ${p.market || p.epic}: would have added ${rung.size} at ${p.cur}. `
+        + `${L.rungs.length} of ${plan.rungs.length} rungs, ${money(ladderRisk(p, L, plan, null))} would be at risk. Nothing sent.`, 10000);
+      return;
+    }
     L.state = 'firing'; persist(); renderOpen();
     // IG measures a stop from the fill, which is not known until it fills, so this lands the rung's
     // stop as close to the shared price as the spread and slippage allow — not exactly on it.
@@ -4033,7 +4049,11 @@ if (typeof module !== 'undefined') module.exports = AN;
           <div class="field full" style="margin-top:14px"><label for="ld-cap">Most you are willing to lose on this ladder</label>
             <input type="number" id="ld-cap" step="any" min="0" value="${existing && existing.maxRisk != null ? existing.maxRisk : Math.ceil(full)}" autocomplete="off">
             <div class="help">Checked before every entry against live numbers. A rung that would push the stack past this does not go on, and the ladder stops there.</div></div>
-          <label class="check" style="margin-top:10px"><input type="checkbox" id="ld-ok">
+          <label class="check" style="margin-top:14px"><input type="checkbox" id="ld-shadow" ${existing ? (existing.shadow ? 'checked' : '') : 'checked'}>
+            <span><b>Shadow mode</b> — run the whole thing and send nothing. Same triggers, same cap, same one rung per poll;
+            each rung is recorded where it would have gone on instead of being placed. Nothing in this app has ever
+            placed an order against a real account, so leave this on until you have watched it behave for a while.</span></label>
+          <label class="check" style="margin-top:10px" id="ld-okwrap"><input type="checkbox" id="ld-ok">
             <span>I understand the finished ladder risks ${money(full)}, not ${seedRisk != null ? money(seedRisk) : '—'}.</span></label>
           ${orderTokenValue() ? '' : `<div class="field full" style="margin-top:12px"><label for="ld-tok">Order token</label>
             <input type="password" id="ld-tok" placeholder="the ORDER_TOKEN set on your worker" autocomplete="off">
@@ -4055,6 +4075,9 @@ if (typeof module !== 'undefined') module.exports = AN;
     document.body.appendChild(wrap);
     const done = () => wrap.remove();
     wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
+    const shadowBox = wrap.querySelector('#ld-shadow'), okWrap = wrap.querySelector('#ld-okwrap');
+    const syncMode = () => { if (okWrap) okWrap.style.opacity = shadowBox && shadowBox.checked ? '0.45' : '1'; };
+    if (shadowBox) { shadowBox.addEventListener('change', syncMode); syncMode(); }
     const disarm = wrap.querySelector('[data-disarm]');
     if (disarm) disarm.addEventListener('click', () => {
       delete ladders()[dealId]; persist(); done(); renderOpen();
@@ -4066,11 +4089,14 @@ if (typeof module !== 'undefined') module.exports = AN;
       const err = wrap.querySelector('#ld-err');
       const cap = parseFloat(wrap.querySelector('#ld-cap').value);
       if (!isFinite(cap) || cap <= 0) { err.textContent = 'Enter the most you are willing to lose.'; return; }
-      if (!wrap.querySelector('#ld-ok').checked) { err.textContent = 'Tick the box to confirm what the finished ladder risks.'; return; }
+      const shadow = wrap.querySelector('#ld-shadow').checked;
+      // A shadow ladder risks nothing, so it does not ask you to sign off on a risk or hand over a
+      // token. Both are the price of going live.
+      if (!shadow && !wrap.querySelector('#ld-ok').checked) { err.textContent = 'Tick the box to confirm what the finished ladder risks, or leave it in shadow mode.'; return; }
       const tokField = wrap.querySelector('#ld-tok');
       const tok = orderTokenValue() || (tokField ? tokField.value.trim() : '');
-      if (!tok) { err.textContent = 'Enter your order token, or a rung will come due and nothing will be sent.'; return; }
-      if (!orderTokenValue()) sessionOrderToken = tok;
+      if (!shadow && !tok) { err.textContent = 'Enter your order token, or a rung will come due and nothing will be sent.'; return; }
+      if (tok && !orderTokenValue()) sessionOrderToken = tok;
       if (cap < full) {
         // Not refused: a cap below the full plan is a deliberate choice to run a shorter ladder.
         const reach = [{ i: -1 }, ...plan.rungs].filter(r => r.i < 0 || ladderRisk(p, null, plan, r) <= cap).length;
@@ -4080,13 +4106,15 @@ if (typeof module !== 'undefined') module.exports = AN;
         key: (existing && existing.key) || newKey(),
         epic: p.epic || '', market: p.market || '', direction: p.direction,
         entry: plan.entry, stopPrice: plan.stopPrice, baseSize: p.size,
-        steps: LADDER_STEPS.slice(), scale: LADDER_SCALE, maxRisk: cap,
+        steps: LADDER_STEPS.slice(), scale: LADDER_SCALE, maxRisk: cap, shadow,
         rungs: (existing && existing.rungs) || [], state: 'armed', note: null,
         armedAt: new Date().toISOString(),
       };
       persist(); done(); renderOpen(); startAuto();
       if (chartState) renderChartPanel();
-      toast(`Ladder armed on ${p.market || p.epic}: up to ${plan.rungs.length} more entries, capped at ${money(cap)}. It only adds while this tab is open.`, 10000);
+      toast(shadow
+        ? `Shadow ladder armed on ${p.market || p.epic}: it will record up to ${plan.rungs.length} entries and send none of them. Only while this tab is open.`
+        : `Ladder armed on ${p.market || p.epic}: up to ${plan.rungs.length} more entries, capped at ${money(cap)}. It only adds while this tab is open.`, 10000);
     });
   }
 
@@ -4193,8 +4221,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       const label = price.toFixed(opts.dp ?? 2);
       ctx.font = '600 10px Inter, system-ui, sans-serif';
       const w = ctx.measureText(label).width + 10;
-      ctx.fillStyle = opts.color || '#555'; ctx.fillRect(a.right - w, pos.y - 8, w, 16);
-      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, a.right - w + 5, pos.y);
+      ctx.fillStyle = opts.color || '#555'; ctx.fillRect(a.right + 3, pos.y - 8, w, 16);
+      ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, a.right + 7, pos.y);
       ctx.restore();
     },
   };
@@ -4210,6 +4238,15 @@ if (typeof module !== 'undefined') module.exports = AN;
   const chartPos = () => !chartState ? null
     : (chartState.preview || (S.positions || []).find(x => x.dealId === chartState.dealId));
   const chartHost = () => $(chartState && chartState.host || '#chartpanel');
+  // Opening one position's chart shows every position on the same instrument. Two entries on one
+  // market are one exposure, and reading them on separate charts is how you misjudge it.
+  const chartSiblings = () => {
+    const p = chartPos();
+    if (!p) return [];
+    if (p.preview || !p.epic) return [p];
+    const all = (S.positions || []).filter(x => x.epic === p.epic);
+    return all.length ? all : [p];
+  };
   const hostQ = sel => { const h = chartHost(); return h ? h.querySelector(sel) : null; };
   const tvHost = () => $(chartState && chartState.tvHost || '#tvpanel');
   // Every resolution IG exposes, labelled the way a charting package would. Anything not in
@@ -4294,9 +4331,12 @@ if (typeof module !== 'undefined') module.exports = AN;
     afterDatasetsDraw(chart, args, opts) {
       const { ctx, chartArea: a, scales: { y } } = chart;
       if (!a || !opts || !opts.lines) return;
+      // Labels live in the price-axis gutter, right of the plot, so a level never sits on top of
+      // a candle. Inside the plot they were only clear while the right-hand gap happened to be
+      // empty, which stops being true the moment you pan.
+      const gut = Math.max(0, (chart.width || a.right) - a.right);
+      if (gut < 24) return;
       ctx.save();
-      // Lines are drawn at their true price, but the labels are nudged apart when levels sit
-      // close together — otherwise "entry" and "now" print on top of each other.
       const drawn = [];
       const visible = opts.lines
         .filter(ln => ln.value != null && isFinite(ln.value))
@@ -4308,24 +4348,47 @@ if (typeof module !== 'undefined') module.exports = AN;
         ctx.strokeStyle = ln.color; ctx.moveTo(a.left, ln.py); ctx.lineTo(a.right, ln.py); ctx.stroke();
       }
       ctx.setLineDash([]);
-      ctx.font = '600 10px Inter, system-ui, sans-serif';
-      const H = 16;
+      ctx.font = '600 9px Inter, system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      const H = 14;
       for (const ln of visible) {
         let ly = ln.py;
         const last = drawn.length ? drawn[drawn.length - 1] : null;
-        if (last != null && ly - last < H + 1) ly = last + H + 1;      // stack downward
+        // levels that sit close together are nudged apart, or they print on top of each other
+        if (last != null && ly - last < H + 1) ly = last + H + 1;
         ly = Math.max(a.top + H / 2, Math.min(a.bottom - H / 2, ly));
         drawn.push(ly);
-        const label = `${ln.label} ${ln.value}`;
-        const w = ctx.measureText(label).width + 10;
-        // a leader line keeps the nudged label attached to its true price
+        const head = `${ln.label} ${ln.value}`;
+        const note = ln.note || '';
+        const x0 = a.right + 3;
+        const room = gut - 6;
+        let hw = ctx.measureText(head).width + 8;
+        let nw = note ? ctx.measureText(note).width + 8 : 0;
+        // when the gutter cannot take both, the running total is the part worth keeping
+        if (hw + nw > room && note) { hw = Math.max(0, room - nw); }
+        if (hw + nw > room) { nw = Math.max(0, room - hw); }
+        // a leader line keeps a nudged label attached to its true price
         if (Math.abs(ly - ln.py) > 1) {
           ctx.beginPath(); ctx.lineWidth = 1; ctx.strokeStyle = ln.color;
-          ctx.moveTo(a.right - w - 5, ln.py); ctx.lineTo(a.right - w, ly); ctx.stroke();
+          ctx.moveTo(a.right, ln.py); ctx.lineTo(x0, ly); ctx.stroke();
         }
-        ctx.fillStyle = ln.color; ctx.fillRect(a.right - w, ly - H / 2, w, H);
-        ctx.fillStyle = ln.text || '#fff'; ctx.textBaseline = 'middle';
-        ctx.fillText(label, a.right - w + 5, ly);
+        if (hw > 10) {
+          ctx.fillStyle = ln.color; ctx.fillRect(x0, ly - H / 2, hw, H);
+          ctx.save();
+          ctx.beginPath(); ctx.rect(x0, ly - H / 2, hw, H); ctx.clip();
+          ctx.fillStyle = ln.text || '#fff';
+          ctx.fillText(head, x0 + 4, ly);
+          ctx.restore();
+        }
+        if (note && nw > 10) {
+          ctx.fillStyle = ln.noteColor || ln.color;
+          ctx.fillRect(x0 + hw + 1, ly - H / 2, nw, H);
+          ctx.save();
+          ctx.beginPath(); ctx.rect(x0 + hw + 1, ly - H / 2, nw, H); ctx.clip();
+          ctx.fillStyle = ln.noteText || '#fff';
+          ctx.fillText(note, x0 + hw + 5, ly);
+          ctx.restore();
+        }
       }
       ctx.restore();
     },
@@ -4386,7 +4449,13 @@ if (typeof module !== 'undefined') module.exports = AN;
         <div class="card-head">
           <div class="card-title">${esc(p.market || p.epic)}<small>${p.preview
             ? `Planning ${p.long ? 'a buy' : 'a sell'}${p.size ? ` of ${p.size}` : ''}`
-            : `${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}`}${chartState.cached ? ' · from cache' : ''}</small></div>
+            : (() => { const sib = chartSiblings();
+                if (sib.length < 2) return `${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}`;
+                const size = Math.round(sib.reduce((t, x) => t + (Number(x.size) || 0), 0) * 100) / 100;
+                const net = sib.every(x => x.pnl != null) ? sib.reduce((t, x) => t + x.pnl, 0) : null;
+                return `${plural(sib.length, 'position')} · ${size} total`
+                  + (net == null ? '' : ` · ${net >= 0 ? '+' : ''}${moneyIn(net, sib[0].ccy)}`);
+              })()}${chartState.cached ? ' · from cache' : ''}</small></div>
           <div class="tbl-tools">
             <span class="tabs">${RES_CHOICES.filter(([k]) => RES_QUICK.includes(k)).map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
             <span class="select sm"><select id="res-more" aria-label="Timeframe">${RES_CHOICES.map(([k, l]) => `<option value="${k}" ${chartState.res === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>
@@ -4629,8 +4698,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       } else chartState.y = null;
     } else {
       chartState.y = null;
-      const cv = hostQ('#c-pos');
-      if (n) chartState.x = defaultWindow(n, cv ? cv.clientWidth : 0);
+      // the plot, not the canvas — the price gutter is not chart, and Fit has to land on the same
+      // window the chart opened with
+      const cv = hostQ('#c-pos'), ch = cv && liveChart(cv);
+      const w = ch && ch.scales && ch.scales.x ? (ch.scales.x.right - ch.scales.x.left)
+        : (cv ? cv.clientWidth : 0);
+      if (n) chartState.x = defaultWindow(n, w);
     }
     redrawChart();
   }
@@ -4766,7 +4839,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       const Y = v => y.getPixelForValue(v);
       ctx.save();
       ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
-      ctx.font = '600 10px Inter, system-ui, sans-serif';
+      ctx.font = '600 9px Inter, system-ui, sans-serif';
       ctx.textBaseline = 'middle';
       for (const d of list) paintDrawing(ctx, d, X, Y, a, opts, d.id === opts.sel);
       ctx.restore();
@@ -4778,12 +4851,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     const handles = [];
     // On a phone the plot is narrow enough that an unclamped label runs off into the price scale,
     // so a tag is nudged back inside and dropped altogether when it would swamp the pane.
-    const tag = (text, px, py, fill, ink) => {
-      const w = ctx.measureText(text).width + 8;
+    // `at` is the right edge the tag hangs off, so labels stack against the drawing's right side
+    // instead of running left across the price action.
+    const tag = (text, at, py, fill, ink) => {
+      const w = ctx.measureText(text).width + 7;
       if (w > (a.right - a.left) * 0.5) return;
-      const x0 = Math.max(a.left + 1, Math.min(px, a.right - w - 1));
-      ctx.fillStyle = fill; ctx.fillRect(x0, py - 8, w, 16);
-      ctx.fillStyle = ink || '#fff'; ctx.fillText(text, x0 + 4, py);
+      const x0 = Math.max(a.left + 1, Math.min(at - w, a.right - w - 1));
+      ctx.fillStyle = fill; ctx.fillRect(x0, py - 7, w, 14);
+      ctx.fillStyle = ink || '#fff'; ctx.fillText(text, x0 + 3.5, py);
     };
     ctx.lineWidth = sel ? 2 : 1.5;
     ctx.strokeStyle = col;
@@ -4791,7 +4866,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (d.type === 'hline') {
       const py = Y(d.a.p);
       ctx.beginPath(); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
-      tag(fmtPrice(d.a.p), a.left + 4, py, col, col === accent ? opts.accentInk : '#fff');
+      tag(fmtPrice(d.a.p), a.right - 2, py, col, col === accent ? opts.accentInk : '#fff');
       handles.push([(a.left + a.right) / 2, py]);
     } else if (d.type === 'trend' || d.type === 'ray') {
       let x1 = X(d.a.t), y1 = Y(d.a.p), x2 = X(d.b.t), y2 = Y(d.b.p);
@@ -4840,11 +4915,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       ctx.beginPath(); ctx.moveTo(l, ye); ctx.lineTo(r, ye); ctx.stroke();
       const risk = Math.abs(d.a.p - d.stop), reward = Math.abs(d.target - d.a.p);
       const rr = risk ? (reward / risk) : 0;
-      tag(`${d.side === 'short' ? 'Short' : 'Long'} ${fmtPrice(d.a.p)}`, l + 4, ye, accent, opts.accentInk);
-      tag(`Target ${fmtPrice(d.target)}`, l + 4, yt, up);
-      tag(`Stop ${fmtPrice(d.stop)}`, l + 4, ys, down);
+      tag(`${d.side === 'short' ? 'Short' : 'Long'} ${fmtPrice(d.a.p)}`, r - 2, ye, accent, opts.accentInk);
+      tag(`TP ${fmtPrice(d.target)}`, r - 2, yt, up);
+      tag(`SL ${fmtPrice(d.stop)}`, r - 2, ys, down);
       const mid = (Math.min(ye, yt) + Math.max(ye, yt)) / 2;
-      if (rr) tag(`${rr.toFixed(2)}R`, r - ctx.measureText(`${rr.toFixed(2)}R`).width - 12, mid, up);
+      if (rr) tag(`${rr.toFixed(2)}R`, r - 2, mid, up);
       handles.push([r, ye], [l + w / 2, yt], [l + w / 2, ys], [l, ye]);
     }
     if (sel) {
@@ -5218,28 +5293,80 @@ if (typeof module !== 'undefined') module.exports = AN;
     pl.drawPaint.upRgb = cssVar('--profit-rgb'); pl.drawPaint.downRgb = cssVar('--loss-rgb');
     pl.drawPaint.accentRgb = cssVar('--accent-rgb') || cssVar('--profit-rgb');
     pl.drawPaint.accentInk = cssVar('--accent-text');
-    pl.levelLines.lines = [
-      { value: p.level, label: 'entry', color: cssVar('--text-3'), dash: [4, 3] },
-      { value: p.stopLevel, label: 'stop', color: down, dash: [5, 4] },
+    const sibs = chartSiblings();
+    const many = sibs.length > 1;
+    const dim = cssVar('--text-3');
+    const pnlNote = v => (v == null ? null : `${v >= 0 ? '+' : ''}${moneyIn(v, sibs[0] && sibs[0].ccy)}`);
+    const lines = [];
+    for (const s of sibs) {
+      lines.push({
+        value: s.level,
+        // with more than one on the instrument the side and size matter more than the word "entry"
+        label: many ? `${s.long ? 'Long' : 'Short'} ${s.size}` : 'entry',
+        note: pnlNote(s.pnl), noteColor: s.pnl == null ? null : (s.pnl >= 0 ? up : down),
+        color: dim, dash: [4, 3], width: s.dealId === chartState.dealId ? 1.5 : 1,
+      });
+      if (s.stopLevel != null) lines.push({ value: s.stopLevel, label: 'stop', color: down, dash: [5, 4] });
+      if (s.limitLevel != null) lines.push({ value: s.limitLevel, label: 'target', color: up, dash: [5, 4] });
       // the app-side stop is drawn apart from IG's so the two are never confused
-      ...(armedStop(p.dealId) ? [{ value: softStops()[p.dealId].price,
-          label: softStops()[p.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] }] : []),
+      if (armedStop(s.dealId)) lines.push({ value: softStops()[s.dealId].price,
+        label: softStops()[s.dealId].trail ? 'app trail' : 'app stop', color: '#f59e0b', dash: [2, 3] });
       // an armed ladder draws the rungs still to come, so the plan is visible against the price
-      ...(() => { const L = ladders()[p.dealId], plan = L ? ladderPlan(p) : null;
-        if (!plan || !L || (L.state !== 'armed' && L.state !== 'firing')) return [];
-        return plan.rungs.filter(r => !L.rungs.some(x => x.i === r.i))
-          .map(r => ({ value: r.price, label: `rung ${r.i + 1} · ${r.size}`, color: '#c084fc', dash: [3, 3] }));
-      })(),
-      { value: p.limitLevel, label: 'target', color: up, dash: [5, 4] },
-      { value: p.cur, label: 'now', color: accent, text: cssVar('--accent-text'), width: 1.5 },
-    ];
+      const L = ladders()[s.dealId], plan = L ? ladderPlan(s) : null;
+      if (plan && L && (L.state === 'armed' || L.state === 'firing')) {
+        for (const r of plan.rungs) {
+          if (L.rungs.some(x => x.i === r.i)) continue;
+          lines.push({ value: r.price, label: `rung ${r.i + 1} · ${r.size}`, color: '#c084fc', dash: [3, 3] });
+        }
+      }
+    }
+    // Average cost across the instrument, carrying its total. Only when every leg is the same way
+    // round: a long and a short netted together have no meaningful average entry.
+    if (many && sibs.every(x => x.long === sibs[0].long)) {
+      const size = sibs.reduce((t, x) => t + (Number(x.size) || 0), 0);
+      if (size > 0) {
+        const avg = sibs.reduce((t, x) => t + Number(x.level) * Number(x.size), 0) / size;
+        const known = sibs.filter(x => x.pnl != null);
+        const tot = known.length === sibs.length ? known.reduce((t, x) => t + x.pnl, 0) : null;
+        lines.push({ value: Math.round(avg * Math.pow(10, yr.dp)) / Math.pow(10, yr.dp),
+          label: `Avg ${Math.round(size * 100) / 100}`, note: pnlNote(tot),
+          noteColor: tot == null ? null : (tot >= 0 ? up : down),
+          color: accent, text: cssVar('--accent-text'), dash: [2, 4], width: 1.5 });
+      }
+    }
+    lines.push({ value: p.cur, label: 'now', color: accent, text: cssVar('--accent-text'), width: 1.5 });
+    // two legs sharing a stop should draw one line, not two on top of each other
+    const seen = new Set();
+    pl.levelLines.lines = lines.filter(ln => {
+      if (ln.value == null || !isFinite(ln.value)) return false;
+      const k = `${ln.label}|${ln.value}`;
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+    // The gutter has to be wide enough for the widest label, or moving them out of the plot just
+    // trades one kind of clipping for another. Capped, so a phone keeps most of its chart.
+    const mctx = chart.ctx;
+    mctx.save(); mctx.font = '600 9px Inter, system-ui, sans-serif';
+    let need = 0;
+    for (const ln of pl.levelLines.lines) {
+      let w = mctx.measureText(`${ln.label} ${ln.value}`).width + 8;
+      if (ln.note) w += mctx.measureText(ln.note).width + 9;
+      need = Math.max(need, w);
+    }
+    mctx.restore();
+    const cw = chart.width || (chart.canvas && chart.canvas.clientWidth) || 600;
+    const gutter = Math.min(Math.max(52, Math.ceil(need) + 10), Math.max(56, Math.round(cw * 0.34)));
+    chart.options.scales.y.afterFit = sc => { sc.width = gutter; };
   }
 
   function drawPositionChart(p) {
     const cv = hostQ('#c-pos'); if (!cv || !chartState || !chartState.candles) return;
     const rows = chartRows();
     if (!rows.length) return;
-    if (!chartState.x) chartState.x = defaultWindow(rows.length, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth));
+    // The first guess has to use the canvas, because the plot's width is not known until the axes
+    // have been laid out — and the price gutter takes a real bite out of it on a narrow screen.
+    const guessed = !chartState.x;
+    if (guessed) chartState.x = defaultWindow(rows.length, cv.clientWidth || (cv.parentElement && cv.parentElement.clientWidth));
     const win = chartState.x = clampX(chartState.x, rows.length);
     // `charts` is a flat array here; drop any previous instance bound to this canvas first
     for (let i = charts.length - 1; i >= 0; i--) {
@@ -5265,6 +5392,17 @@ if (typeof module !== 'undefined') module.exports = AN;
     charts.push(chart);
     syncChart(chart, p);
     chart.update('none');
+    // Now the plot's real width is known, so a candle can be sized against the space it actually
+    // has rather than against the canvas it shares with the price scale.
+    if (guessed && chart.scales && chart.scales.x) {
+      const plotW = chart.scales.x.right - chart.scales.x.left;
+      const better = defaultWindow(rows.length, plotW);
+      if (plotW > 40 && Math.abs((better.max - better.min) - (win.max - win.min)) > 0.5) {
+        chartState.x = better;
+        syncChart(chart, p);
+        chart.update('none');
+      }
+    }
     attachZoom(cv);
     attachCrosshair(cv);
     drawSubPanes(rows, win);
@@ -5386,7 +5524,7 @@ if (typeof module !== 'undefined') module.exports = AN;
                 const cls = !L ? 'ghost' : L.state === 'armed' ? 'ghost armed' : L.state === 'firing' ? 'ghost armed' : L.state === 'done' ? 'ghost' : 'ghost danger';
                 const label = !L ? 'Ladder' : L.state === 'firing' ? 'adding…' : L.state === 'error' ? 'ladder failed'
                   : L.state === 'unconfirmed' ? 'unconfirmed' : L.state === 'capped' ? 'at cap'
-                  : `ladder ${L.rungs.length}/${(L.steps || LADDER_STEPS).length}`;
+                  : `${L.shadow ? 'shadow' : 'ladder'} ${L.rungs.length}/${(L.steps || LADDER_STEPS).length}`;
                 const title = L && L.note ? esc(L.note)
                   : 'Add to this position on a fixed schedule as it goes against you, under one shared stop and a money cap';
                 return `<button class="btn ${cls} sm" data-ladder="${esc(p.dealId)}" title="${title}">${esc(label)}</button>`; })()}

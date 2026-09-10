@@ -397,11 +397,14 @@ async function candleChart(browser, viewport, touch) {
     const hint = await page.evaluate(() => document.querySelector('.chart-hint')?.innerText || '');
     check('phone: the hint does not tell a finger to scroll-zoom', !/scroll/i.test(hint), hint);
     check('phone: there is future room to scroll into', a.future > 0, `${a.future} slots`);
+    // aimed at the plot, not the canvas: the price gutter is not draggable chart
     await page.evaluate(bx => { const cv = document.querySelector('#c-pos');
+      const a = Chart.getChart(cv).chartArea;
+      const x0 = bx.x + a.left + (a.right - a.left) * 0.5, y0 = bx.y + (a.top + a.bottom) / 2;
       const mk = (t, x, y, id = 1) => cv.dispatchEvent(new PointerEvent(t, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true, isPrimary: true }));
-      mk('pointerdown', bx.x + bx.width * 0.7, bx.y + bx.height * 0.5);
-      for (let i = 1; i <= 10; i++) mk('pointermove', bx.x + bx.width * 0.7 + i * 12, bx.y + bx.height * 0.5);
-      mk('pointerup', bx.x + bx.width * 0.7 + 120, bx.y + bx.height * 0.5);
+      mk('pointerdown', x0, y0);
+      for (let i = 1; i <= 10; i++) mk('pointermove', x0 + i * 12, y0);
+      mk('pointerup', x0 + 120, y0);
     }, box);
     await page.waitForTimeout(350);
     check('phone: a horizontal drag pans time', (await win()).min < a.min, `${a.min} -> ${(await win()).min}`);
@@ -834,7 +837,10 @@ async function drawingTools(browser) {
   const hl = (await st()).draws.find(d => d.type === 'hline');
   const py = await page.evaluate(v => Chart.getChart(document.querySelector('#c-pos')).scales.y.getPixelForValue(v), hl.a.p);
   b = await box();
-  await page.mouse.click(b.x + b.width * 0.92, b.y + py);
+  // clear of both position boxes, which sit in the middle and right of the plot
+  const plotX = await page.evaluate(() => { const c = Chart.getChart(document.querySelector('#c-pos'));
+    return c.chartArea.left + (c.chartArea.right - c.chartArea.left) * 0.05; });
+  await page.mouse.click(b.x + plotX, b.y + py);
   await page.waitForTimeout(250);
   check('clicking a drawing selects it', (await st()).sel === hl.id, String((await st()).sel));
   await page.keyboard.press('Delete');
@@ -1069,9 +1075,10 @@ async function averagingLadder(browser) {
   const txt = (pg, sel) => pg.evaluate(s => (document.querySelector(s) || {}).innerText || '', sel);
   const led = pg => pg.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).settings.ladders || {}).D1 || null);
   const since = n => calls.slice(n).filter(c => c.p === '/order').map(c => JSON.parse(c.body));
-  const armIt = async (pg, cap) => {
+  const armIt = async (pg, cap, shadow = false) => {
     await pg.fill('#ld-cap', String(cap));
-    await pg.evaluate(() => { document.querySelector('#ld-ok').checked = true; });
+    await pg.evaluate(sh => { document.querySelector('#ld-shadow').checked = sh;
+      document.querySelector('#ld-ok').checked = true; }, shadow);
     const tok = await pg.$('#ld-tok');
     if (tok) await pg.fill('#ld-tok', 'ORDERTOK');
     await pg.evaluate(() => document.querySelector('[data-arm]').click());
@@ -1081,16 +1088,19 @@ async function averagingLadder(browser) {
   state = pos(5010, 5011);
   const { page, errs } = await openPage(browser);
   await openDlg(page);
+  check('a new ladder starts in shadow mode',
+    await page.evaluate(() => document.querySelector('#ld-shadow').checked));
   const dlg = await txt(page, '#ld-modal');
   check('the dialog states what the finished ladder risks', /332\.5/.test(dlg), dlg.slice(0, 120));
   check('and contrasts it with the position on its own', /100/.test(dlg));
   check('it lists both rungs with their trigger prices', /4980/.test(dlg) && /4950/.test(dlg));
   check('and their scaled sizes', /1\.5/.test(dlg) && /2\.25/.test(dlg));
 
-  await page.evaluate(() => { document.querySelector('#ld-cap').value = '400'; });
+  await page.evaluate(() => { document.querySelector('#ld-cap').value = '400';
+    document.querySelector('#ld-shadow').checked = false; });
   await page.evaluate(() => document.querySelector('[data-arm]').click());
   await page.waitForTimeout(300);
-  check('it will not arm until the risk is acknowledged',
+  check('going live will not arm until the risk is acknowledged',
     /confirm/i.test(await txt(page, '#ld-err')) && !(await led(page)), await txt(page, '#ld-err'));
 
   await armIt(page, 400);
@@ -1197,6 +1207,46 @@ async function averagingLadder(browser) {
     !(await p5.evaluate(() => !!document.querySelector('[data-arm]'))), await txt(p5, '#ld-modal'));
   await p5.context().close();
 
+  // Shadow mode: the whole engine runs and nothing leaves the browser.
+  state = pos(5010, 5011);
+  const { page: p7, errs: e7 } = await openPage(browser);
+  await openDlg(p7); await armIt(p7, 400, true);
+  const sh = await led(p7);
+  check('a shadow ladder arms without a token', !!sh && sh.state === 'armed' && sh.shadow === true,
+    JSON.stringify(sh && { state: sh.state, shadow: sh.shadow }));
+  const q = calls.length;
+  state.positions[0].bid = 4978; state.positions[0].offer = 4979;
+  await p7.waitForTimeout(3200);
+  const rec = await led(p7);
+  check('it records the rung it would have placed', !!rec && rec.rungs.length === 1, JSON.stringify(rec && rec.rungs));
+  check('at the price it would have gone on', !!rec && Math.abs(rec.rungs[0].price - 4978) <= 1, JSON.stringify(rec && rec.rungs[0]));
+  check('and marks it as never sent', !!rec && rec.rungs[0].shadow === true);
+  check('no order reaches the worker', since(q).length === 0, JSON.stringify(since(q)));
+  check('the row says shadow, not ladder',
+    /shadow/i.test(await p7.evaluate(() => (document.querySelector('[data-ladder]') || {}).innerText || '')),
+    await p7.evaluate(() => (document.querySelector('[data-ladder]') || {}).innerText || ''));
+  state.positions[0].bid = 4948; state.positions[0].offer = 4949;
+  await p7.waitForTimeout(3200);
+  const fin = await led(p7);
+  check('it runs the whole plan', !!fin && fin.rungs.length === 2 && fin.state === 'done', JSON.stringify(fin && fin.state));
+  check('still sending nothing', since(q).length === 0, JSON.stringify(since(q)));
+  check('no page errors in shadow mode', e7.length === 0, e7.slice(0, 2).join(' | '));
+  await p7.context().close();
+
+  // the cap is the same code path either way, so it has to hold in shadow too
+  state = pos(5010, 5011);
+  const { page: p8 } = await openPage(browser);
+  await openDlg(p8); await armIt(p8, 250, true);
+  state.positions[0].bid = 4978; state.positions[0].offer = 4979;
+  await p8.waitForTimeout(3200);
+  state.positions[0].bid = 4948; state.positions[0].offer = 4949;
+  await p8.waitForTimeout(3400);
+  const cap8 = await led(p8);
+  check('a shadow ladder stops at its cap like a real one',
+    !!cap8 && cap8.state === 'capped' && cap8.rungs.length === 1,
+    JSON.stringify(cap8 && { state: cap8.state, rungs: cap8.rungs.length }));
+  await p8.context().close();
+
   // A position that has gone takes its ladder with it.
   state = pos(5010, 5011);
   const { page: p6 } = await openPage(browser);
@@ -1281,6 +1331,69 @@ async function marketSearch(browser) {
   await p2.context().close();
 }
 
+// Two entries on one instrument are one exposure. Opening either one's chart has to show both,
+// what each is doing, and what the pair costs together — and none of it may sit on a candle.
+async function multiPosition(browser) {
+  state = { orders: [], positions: [
+    { dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500', direction: 'BUY', size: 0.2,
+      level: 5000, bid: 5060, offer: 5061, stopLevel: 4900, limitLevel: 5200, contractSize: 1, currency: 'USD' },
+    { dealId: 'D2', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500', direction: 'BUY', size: 0.4,
+      level: 5040, bid: 5060, offer: 5061, stopLevel: 4900, limitLevel: 5250, contractSize: 1, currency: 'USD' },
+  ] };
+  const { page, errs } = await openPage(browser, { width: 1400, height: 900 });
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2400);
+  const lines = () => page.evaluate(() => Chart.getChart(document.querySelector('#c-pos'))
+    .options.plugins.levelLines.lines.map(l => ({ label: l.label, value: l.value, note: l.note || null })));
+  const L = await lines();
+  const legs = L.filter(l => l.label.startsWith('Long'));
+  const avg = L.find(l => l.label.startsWith('Avg'));
+
+  check('both positions are drawn', legs.length === 2, JSON.stringify(L.map(l => l.label)));
+  check('each carries its own size',
+    legs.some(l => /0\.2/.test(l.label)) && legs.some(l => /0\.4/.test(l.label)), JSON.stringify(legs.map(l => l.label)));
+  check('and its own running P&L', legs.every(l => !!l.note), JSON.stringify(legs));
+  check('an average cost line is drawn', !!avg, JSON.stringify(L.map(l => l.label)));
+  // 0.2 at 5000 and 0.4 at 5040 weight to 5026.67, not the 5020 a plain mean would give
+  check('weighted by size, not a plain mean', !!avg && Math.abs(avg.value - 5026.67) < 0.1, avg && String(avg.value));
+  check('carrying the total for the instrument', !!avg && !!avg.note, avg && String(avg.note));
+  const num = t => parseFloat(String(t).replace(/[^0-9.]/g, '')) * (/[−-]/.test(String(t)) ? -1 : 1);
+  check('and that total is the sum of the parts',
+    Math.abs(num(avg.note) - (num(legs[0].note) + num(legs[1].note))) < 0.02,
+    `${legs.map(l => l.note).join(' + ')} vs ${avg.note}`);
+  check('a shared stop is drawn once, not twice', L.filter(l => l.label === 'stop').length === 1);
+  check('but differing targets are both kept', L.filter(l => l.label === 'target').length === 2);
+  check('the header counts them',
+    /2 positions/.test(await page.evaluate(() => (document.querySelector('#chartcard .card-title small') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#chartcard .card-title small') || {}).innerText || ''));
+
+  // Labels live outside the plot, so no amount of panning can put one over a candle.
+  const geom = await page.evaluate(() => { const c = Chart.getChart(document.querySelector('#c-pos'));
+    return { gutter: Math.round(c.width - c.chartArea.right), width: Math.round(c.width) }; });
+  check('the price gutter is wide enough to hold them', geom.gutter >= 52, JSON.stringify(geom));
+  check('and does not swallow the chart', geom.gutter <= geom.width * 0.35, JSON.stringify(geom));
+
+  await page.evaluate(() => document.querySelector('[data-chartclose]')?.click());
+  await page.waitForTimeout(400);
+  await page.evaluate(() => document.querySelectorAll('.symlink')[1]?.click());
+  await page.waitForTimeout(2400);
+  check('opening the sibling shows the same pair',
+    (await lines()).filter(l => l.label.startsWith('Long')).length === 2);
+  check('no page errors with two positions', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+
+  // One position on its own keeps the plain wording and grows no average line.
+  state.positions = [state.positions[0]];
+  const { page: p2 } = await openPage(browser, { width: 1400, height: 900 });
+  await p2.evaluate(() => document.querySelector('.symlink')?.click());
+  await p2.waitForTimeout(2400);
+  const solo = await p2.evaluate(() => Chart.getChart(document.querySelector('#c-pos'))
+    .options.plugins.levelLines.lines.map(l => l.label));
+  check('a single position is still just "entry"',
+    solo.includes('entry') && !solo.some(l => l.startsWith('Avg')), JSON.stringify(solo));
+  await p2.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1298,6 +1411,7 @@ async function marketSearch(browser) {
       ['app-side stops', appSideStops], ['trailing stops', trailingStops],
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
       ['averaging ladder', averagingLadder], ['market search', marketSearch],
+      ['two positions on one market', multiPosition],
       ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;

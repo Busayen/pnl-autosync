@@ -324,6 +324,20 @@ That last detail matters after a gap. If price jumps through a trigger the rung 
 which makes the stack cost more at the stop than the plan said. The cap sees the real fills, so a
 bad fill brings the ladder up against it sooner.
 
+### Shadow mode
+
+A new ladder arms in **shadow mode** by default, and you should leave it there for a while.
+
+It runs the entire engine — same triggers, same money cap recomputed from live numbers, same one
+rung per poll — and sends nothing. Each rung is recorded where it *would* have gone on, at the
+price it would have got, and the row shows `shadow 1/2` instead of `ladder 1/2`. Nothing in this
+app has ever placed an order against a real account; the field names in the worker's `/order` come
+from IG's documentation rather than from a successful fill. Finding out with money is the expensive
+way round.
+
+A shadow ladder needs no order token and does not ask you to sign off on the risk. Both are the
+price of going live: untick shadow and the dialog asks for the token and the acknowledgement.
+
 ### The rest of the guardrails
 
 - **Every rung carries a broker stop** aimed at the shared level, so the stack is protected with
@@ -376,6 +390,19 @@ screen — most of a pane's worth of empty space to plan into, and more the furt
 
 `Fit` restores that default, `All` shows every candle, and `Levels` reframes the price around your
 entry, stop and target.
+
+### More than one position on a market
+
+Opening a chart shows **every** position on that instrument, not just the one you clicked. Two
+entries on one market are one exposure, and reading them on separate charts is how you misjudge it.
+
+Each leg draws its own line, labelled with its side, size and running P&L. When they are all the
+same way round, a dashed **average cost** line is drawn too, weighted by size, carrying the total
+for the instrument. A stop both legs share is drawn once; different targets are both kept.
+
+Labels sit in the price gutter, right of the plot, so a level can never end up on top of a candle
+whatever you do with the pan. The gutter widens to fit the longest label and is capped at a third
+of the chart, so a phone keeps most of its price action.
 
 ### Drawing tools
 
