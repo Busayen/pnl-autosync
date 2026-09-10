@@ -244,6 +244,9 @@ td .del:hover { color: var(--loss); background: var(--loss-soft); }
 .modal.wide { max-width: 560px; }
 .modal.ticket { max-width: min(1180px, calc(100vw - 32px)); }
 #ld-modal { max-width: min(680px, calc(100vw - 32px)); }
+.venue-pick { margin-left: 10px; flex: none; }
+.venue-pick select { height: 30px; font-size: 12px; font-weight: 600; padding-right: 26px; }
+@media (max-width: 640px) { .venue-pick { margin-left: 6px; } .venue-pick select { height: 28px; font-size: 11.5px; } }
 .epicfield { position: relative; }
 .epic-pop { position: absolute; z-index: 40; left: 0; right: 0; top: 100%; margin-top: 4px; max-height: 280px; overflow: auto;
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: var(--card-shadow); padding: 4px; }
@@ -1109,6 +1112,7 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   <div class="ro-banner hidden" id="ro-banner"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><span></span></div>
   <header class="nav">
     <div class="brand" id="brand"><span class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></span>Ledger</div>
+    <span class="select sm venue-pick"><select id="venue" aria-label="Account"></select></span>
     <nav class="subnav" id="subnav"></nav>
     <div class="nav-actions">
       <button class="btn ghost icon" data-act="cmd" title="Command palette (⌘K)" aria-label="Command palette"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg></button>
@@ -1122,6 +1126,16 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
   </header>
 
   <main class="page">
+    <section class="card hero hidden" id="lq-hero">
+      <div class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></div>
+      <h2>Liquid, kept apart</h2>
+      <p>A separate book with its own trades, its own calendar and its own statistics. Nothing here
+        is netted against IG — different broker, different currency, and one of them is leveraged
+        perpetuals, so a combined P&amp;L would mean nothing.</p>
+      <p class="dim" style="font-size:12px;max-width:52ch">Paste the portfolio blob for open positions,
+        the history blob for realised P&amp;L, or both. Fills already imported are skipped rather than counted twice.</p>
+      <div class="row"><button class="btn primary" data-lqimport>Paste Liquid data</button></div>
+    </section>
     <section class="card hero" id="hero">
       <div class="mark"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 4-7 5 5"/></svg></div>
       <h2>Your trading, at a glance</h2>
@@ -2333,7 +2347,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.1.0';
+  const APP_VERSION = 'v9.2.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2368,6 +2382,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
     cmp: { a: '30d', b: 'p30d', af: '', at: '', bf: '', bt: '' },
     pending: null, activity: null, activityJson: null, activityMeta: null,
+    venue: 'ig', books: {}, lq: { positions: [], account: null, fetched: null },
     positions: null, posFetched: null, posError: null, posBusy: false,
     orders: null, ordFetched: null, ordError: null, ordBusy: false, ordAt: 0,
   };
@@ -2377,7 +2392,13 @@ if (typeof module !== 'undefined') module.exports = AN;
   // after a reload.
   let warnedFull = false;
   const persist = () => {
-    const ok = store.save({ trades: S.trades, theme: S.theme, settings: S.settings, section: S.section, activity: S.activity, activityJson: S.activityJson });
+    // The inactive venue's book is written alongside the active one, or switching away from it
+    // would be the same as deleting it.
+    const books = { ...(S.books || {}) };
+    books[S.venue] = { trades: S.trades, activity: S.activity, activityJson: S.activityJson,
+                       lq: S.lq, f: S.f, cal: S.cal, section: S.section };
+    const ok = store.save({ trades: S.trades, theme: S.theme, settings: S.settings, section: S.section,
+      activity: S.activity, activityJson: S.activityJson, venue: S.venue, books, lq: S.lq });
     if (!ok && store.ok && !RO && !warnedFull) {
       warnedFull = true;
       // Callers toast their own success right after persisting, so the warning has to land after
@@ -2495,9 +2516,13 @@ if (typeof module !== 'undefined') module.exports = AN;
     const s = S.trades.length ? C.computeStats(S.trades) : null; const code = currencyCode();
     // brand status removed: the filter bar already shows the trade count and date range
     $('#btn-export').disabled = !S.trades.length;
-    $('#btn-sync').classList.toggle('hidden', RO || !S.settings.syncUrl);
-    $('#subnav').innerHTML = SECTIONS.map(([k, l, short]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}"><span class="lbl-full">${l}</span><span class="lbl-short">${short || l}</span></button>`).join('');
+    $('#btn-sync').classList.toggle('hidden', RO || !S.settings.syncUrl || S.venue !== 'ig');
+    $('#subnav').innerHTML = sectionsFor(S.venue).map(([k, l, short]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}"><span class="lbl-full">${l}</span><span class="lbl-short">${short || l}</span></button>`).join('');
     $$('#subnav [data-section]').forEach(b => b.addEventListener('click', () => setSection(b.dataset.section)));
+    renderVenue();
+    const vsel = $('#venue');
+    // assigned rather than added: renderNav runs on every render and would stack listeners
+    if (vsel) vsel.onchange = () => setVenue(vsel.value);
   }
   function setSection(k) {
     if (k !== 'open') closeChart();
@@ -5462,6 +5487,7 @@ if (typeof module !== 'undefined') module.exports = AN;
 
   function renderOpen() {
     const el = $('#open'); if (!el) return;
+    if (S.venue === 'liquid') return renderLiquidOpen();
     // Both cards are rebuilt on every poll. Keyed rather than indexed, because the positions
     // card disappears when nothing is open and an index would then restore the wrong table.
     const keep = new Map();
@@ -5576,9 +5602,229 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
     switch (S.section) { case 'overview': drawEquity(); break; case 'performance': drawPerformance(); break; case 'risk': drawRisk(); break; case 'trends': drawTrends(); break; }
   }
+  // ---- venues ----
+  // IG and Liquid share nothing: different broker, different currency, different instruments, and
+  // one of them is leveraged perpetuals. Netting them into a single P&L would make every statistic
+  // on this page meaningless, so the dashboard swaps between them wholesale instead — separate
+  // trades, separate calendar, separate filters, separate everything.
+  const VENUES = [['ig', 'IG'], ['liquid', 'Liquid']];
+  const venueName = v => (VENUES.find(x => x[0] === v) || VENUES[0])[1];
+  const emptyLq = () => ({ positions: [], account: null, fetched: null });
+  const blankFilter = () => ({ tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' });
+  // Risk analytics are built on stop levels and session capital, neither of which a perpetuals
+  // venue reports, so that tab is not offered where it could only ever be blank.
+  const sectionsFor = v => (v === 'liquid' ? SECTIONS.filter(x => x[0] !== 'risk') : SECTIONS);
+
+  const bookOut = () => ({ trades: S.trades, activity: S.activity, activityJson: S.activityJson,
+                           lq: S.lq, f: S.f, cal: S.cal, section: S.section });
+  function bookIn(b) {
+    b = b || {};
+    S.trades = Array.isArray(b.trades) ? b.trades : [];
+    S.activity = b.activity || null;
+    S.activityJson = b.activityJson || null;
+    S.lq = b.lq || emptyLq();
+    S.f = b.f || blankFilter();
+    S.cal = b.cal || { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 };
+    S.section = sectionsFor(S.venue).some(x => x[0] === b.section) ? b.section : 'overview';
+    S.selectedDay = null; S.showAll = false; S.query = '';
+  }
+  function setVenue(v) {
+    if (v === S.venue || !VENUES.some(x => x[0] === v)) return;
+    S.books = S.books || {};
+    S.books[S.venue] = bookOut();
+    S.venue = v;
+    bookIn(S.books[v]);
+    closeChart();
+    applyActivity();
+    persist();
+    killCharts();
+    renderAll();
+    renderVenue();
+  }
+  function renderVenue() {
+    const el = $('#venue'); if (!el) return;
+    el.innerHTML = VENUES.map(([k, l]) => `<option value="${k}" ${S.venue === k ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    document.body.dataset.venue = S.venue;
+  }
+
+  // ---- Liquid ----
+  // Liquid runs on Hyperliquid. This page is static and holds no credentials for it, so the data
+  // arrives the way everything else here does — you paste it, in exactly the shape Liquid's own
+  // portfolio and history calls hand back.
+  const lqNum = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; };
+
+  // A fill is not a trade. Only the closing half has a result, and Liquid reports that result
+  // exactly — so the entry that produced it can be recovered rather than guessed. The opening half
+  // is not a result yet, but its fee has already been paid, and that belongs on the day it was.
+  function liquidRecords(rows) {
+    const out = [];
+    for (const f of rows || []) {
+      const iso = String(f.time || '');
+      const date = iso.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const size = Math.abs(lqNum(f.size) || 0), px = lqNum(f.price);
+      if (px == null) continue;
+      const fee = Math.abs(lqNum(f.fee) || 0);
+      const asset = C.cleanInstrument(String(f.asset || f.coin || '')) || 'UNKNOWN';
+      const time = iso.slice(11, 16);
+      const ref = `LQ-${f.txHash || iso}-${f.side || ''}-${size}-${px}`;
+      const gross = f.closedPnl == null || f.closedPnl === '' ? null : lqNum(f.closedPnl);
+      if (gross != null) {
+        const long = /long/i.test(String(f.direction || ''));
+        // closedPnl = (close − open) × size for a long, and the mirror of that for a short
+        const open = size > 0 ? (long ? px - gross / size : px + gross / size) : px;
+        out.push({ kind: 'trade', date, time, instrument: asset,
+          direction: long ? 'BUY' : 'SELL', size: String(size),
+          openLevel: Math.round(open * 1e6) / 1e6, closeLevel: px,
+          currency: 'USD', pnl: Math.round((gross - fee) * 100) / 100,
+          reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
+      } else if (fee > 0) {
+        out.push({ kind: 'cost', date, time, instrument: asset, direction: '', size: String(size),
+          currency: 'USD', pnl: -Math.round(fee * 100) / 100,
+          reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
+      }
+    }
+    return out;
+  }
+
+  const lqPositions = list => (list || []).map(p => ({
+    symbol: String(p.symbol || ''),
+    name: C.cleanInstrument(String(p.displayName || p.symbol || '')) || '—',
+    long: String(p.side || '').toLowerCase() !== 'short',
+    size: lqNum(p.size), entry: lqNum(p.entryPx), mark: lqNum(p.markPx),
+    leverage: lqNum(p.leverage), leverageType: String(p.leverageType || ''),
+    pnl: lqNum(p.unrealizedPnl), liq: lqNum(p.liquidationPx), margin: lqNum(p.marginUsed),
+    roe: lqNum(p.returnOnEquity), tp: lqNum(p.tp), sl: lqNum(p.sl),
+  })).filter(p => p.symbol);
+
+  // Both blobs are accepted, together or one at a time: the portfolio one carries `account` and
+  // `positions`, the history one carries `rows`.
+  function readLiquid(text) {
+    let j;
+    try { j = JSON.parse(text); } catch { throw new Error('That is not JSON. Copy the whole blob, braces included.'); }
+    if (!j || typeof j !== 'object') throw new Error('Expected a JSON object.');
+    const positions = Array.isArray(j.positions) ? j.positions
+      : (j.portfolio && Array.isArray(j.portfolio.positions) ? j.portfolio.positions : null);
+    const rows = Array.isArray(j.rows) ? j.rows
+      : (j.history && Array.isArray(j.history.rows) ? j.history.rows : null);
+    const account = j.account || (j.portfolio && j.portfolio.account) || null;
+    if (!positions && !rows) throw new Error('No positions and no rows in there. Paste the portfolio blob or the history blob.');
+    return { positions, rows, account };
+  }
+
+  function liquidImport() {
+    if (RO) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'overlay open';
+    wrap.innerHTML = `<div class="modal wide" id="lq-modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><div><h3>Import from Liquid</h3>
+          <p>Paste what Liquid gives you — the portfolio blob, the history blob, or both.</p></div>
+          <button class="btn ghost icon sm" data-x aria-label="Close">${I.x}</button></div>
+        <div class="modal-body">
+          <div class="field full"><label for="lq-json">Liquid JSON</label>
+            <textarea id="lq-json" rows="9" spellcheck="false" autocomplete="off"
+              placeholder='{"account":{...},"positions":[...]}    or    {"rows":[...]}'></textarea>
+            <div class="help">Positions replace what is here; fills are merged, and a fill already
+              imported is skipped rather than counted twice. Nothing touches your IG book.</div></div>
+          <div class="notice" style="margin-top:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <div id="lq-note">Nothing read yet.</div></div>
+          <div class="err" id="lq-err" style="margin-top:10px"></div>
+        </div>
+        <div class="modal-foot"><button class="btn ghost" data-x>Cancel</button>
+          <div class="right"><button class="btn primary" data-lqgo disabled>Import</button></div></div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const done = () => wrap.remove();
+    wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) done(); });
+    const ta = wrap.querySelector('#lq-json'), note = wrap.querySelector('#lq-note');
+    const err = wrap.querySelector('#lq-err'), go = wrap.querySelector('[data-lqgo]');
+    let parsed = null;
+    const look = () => {
+      err.textContent = ''; parsed = null; go.disabled = true;
+      const t = ta.value.trim();
+      if (!t) { note.textContent = 'Nothing read yet.'; return; }
+      try { parsed = readLiquid(t); } catch (e) { note.textContent = 'Nothing usable yet.'; err.textContent = String(e.message || e); return; }
+      const recs = liquidRecords(parsed.rows);
+      const have = new Set(S.trades.map(x => x.reference));
+      const fresh = recs.filter(r => !have.has(r.reference));
+      const closes = fresh.filter(r => r.kind === 'trade');
+      parsed.fresh = fresh;
+      note.innerHTML = [
+        parsed.positions ? `<b>${plural(lqPositions(parsed.positions).length, 'open position')}</b>` : null,
+        parsed.rows ? `<b>${plural(closes.length, 'closed trade')}</b> and ${plural(fresh.length - closes.length, 'fee')} not already here`
+          : null,
+        parsed.rows && fresh.length < recs.length ? `<span class="dim">${recs.length - fresh.length} already imported, skipped</span>` : null,
+      ].filter(Boolean).join(' · ') || 'Read it, but there was nothing new in it.';
+      go.disabled = !(parsed.positions || fresh.length);
+    };
+    ta.addEventListener('input', look);
+    setTimeout(() => ta.focus(), 30);
+    go.addEventListener('click', () => {
+      if (!parsed) return;
+      if (parsed.positions) {
+        S.lq = S.lq || emptyLq();
+        S.lq.positions = lqPositions(parsed.positions);
+        S.lq.account = parsed.account || S.lq.account;
+        S.lq.fetched = new Date().toISOString();
+      }
+      const added = (parsed.fresh || []).map(t => ({ ...t, id: C.tradeKey(t) }));
+      if (added.length) S.trades = S.trades.concat(added).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      persist(); done(); killCharts(); renderAll();
+      toast(`Liquid: ${plural(added.filter(t => t.kind === 'trade').length, 'trade')} imported, `
+        + `${plural((S.lq && S.lq.positions || []).length, 'open position')} held.`, 8000);
+    });
+  }
+
+  // The open-positions view for Liquid. Nothing here can act on the account: it is a mirror of
+  // what Liquid already shows, kept beside the P&L rather than in another tab of another site.
+  function renderLiquidOpen() {
+    const el = $('#open'); if (!el) return;
+    const ps = (S.lq && S.lq.positions) || [], acc = S.lq && S.lq.account;
+    const dp = v => (v == null ? '—' : Math.abs(v) >= 1000 ? v.toFixed(1) : Math.abs(v) >= 10 ? v.toFixed(3) : v.toFixed(5));
+    const usd = v => (v == null ? '—' : (v < 0 ? '−' : '') + 'US$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const net = ps.reduce((a, p) => a + (p.pnl || 0), 0);
+    const stamp = S.lq && S.lq.fetched ? new Date(S.lq.fetched) : null;
+    if (!ps.length) {
+      el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>From Liquid</small></div>
+        <button class="btn sm edit" data-lqimport>Paste Liquid data</button></div>
+        <div class="card-body dim" style="font-size:12px">Nothing imported yet. Paste the portfolio blob and your open positions appear here.</div></div>`;
+      const b = el.querySelector('[data-lqimport]'); if (b) b.addEventListener('click', liquidImport);
+      return;
+    }
+    el.innerHTML = `<div class="card"><div class="card-head">
+        <div class="card-title">Open positions<small>From Liquid${stamp ? ` · pasted ${stamp.toLocaleString()}` : ''}</small></div>
+        <button class="btn sm edit" data-lqimport>Paste Liquid data</button></div>
+      <div class="card-body">
+        <div class="stat-row" style="padding-bottom:12px">
+          <div><span class="k">Unrealised</span><b class="${cls(net)}">${usd(net)}</b><span class="k">${plural(ps.length, 'position')}</span></div>
+          ${acc ? `<div><span class="k">Equity</span><b>${usd(lqNum(acc.equity) ?? lqNum(acc.account_value))}</b><span class="k">${acc.username ? esc(String(acc.username)) : ''}</span></div>
+          <div><span class="k">Margin used</span><b>${usd(lqNum(acc.margin_used))}</b><span class="k">${usd(lqNum(acc.available_balance))} free</span></div>` : ''}
+        </div>
+        <div class="tbl-wrap" data-sk="lqpos"><table><thead><tr><th>Market</th><th>Side</th><th class="r">Size</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">Liquidation</th><th class="r">TP / SL</th><th class="r">Unrealised</th></tr></thead><tbody>
+          ${ps.map(p => `<tr>
+            <td class="sym">${esc(p.name)}${p.leverage ? `<span class="tag" title="${esc(p.leverageType || '')} margin">${p.leverage}x</span>` : ''}</td>
+            <td><span class="side ${p.long ? 'long' : 'short'}">${p.long ? 'Long' : 'Short'}</span></td>
+            <td class="r num muted">${p.size == null ? '—' : p.size}</td>
+            <td class="r num muted">${dp(p.entry)}</td>
+            <td class="r num">${dp(p.mark)}</td>
+            <td class="r num loss" title="Where this position is closed out for you">${dp(p.liq)}</td>
+            <td class="r num muted">${p.tp == null ? '—' : dp(p.tp)} <span class="dim">/</span> ${p.sl == null ? '—' : dp(p.sl)}</td>
+            <td class="r num ${cls(p.pnl)}" style="font-weight:600">${usd(p.pnl)}${p.roe != null ? `<span class="k"> ${(p.roe * 100).toFixed(1)}%</span>` : ''}</td></tr>`).join('')}
+        </tbody></table></div>
+        <div class="dim" style="font-size:11px;margin-top:10px">A mirror of what Liquid shows, pasted in. Nothing here can open, close or change a position — those live on Liquid.</div>
+      </div></div>`;
+    const b = el.querySelector('[data-lqimport]'); if (b) b.addEventListener('click', liquidImport);
+  }
+
   function renderAll() {
-    const has = S.trades.length > 0;
-    $('#hero').classList.toggle('hidden', has); $('#dash').classList.toggle('hidden', !has);
+    const lq = S.venue === 'liquid';
+    // Liquid positions are worth showing even before any trade has closed, so the dashboard opens
+    // on them rather than on an empty-state that hides what you already hold.
+    const has = S.trades.length > 0 || (lq && ((S.lq && S.lq.positions) || []).length > 0);
+    $('#hero').classList.toggle('hidden', has || lq);
+    $('#lq-hero').classList.toggle('hidden', has || !lq);
+    $('#dash').classList.toggle('hidden', !has);
+    renderVenue();
     $$('.section').forEach(sec => sec.classList.toggle('hidden', sec.dataset.sec !== S.section));
     if (has) renderData(); else { killCharts(); renderNav(); }
   }
@@ -5688,6 +5934,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     return pollFails ? Math.min(base * Math.pow(2, pollFails), 60000) : base;   // back off on failure
   }
   function schedulePoll() {
+    if (S.venue !== 'ig') return;
     clearTimeout(pollTimer);
     if (RO || !S.settings.autoSync || !S.settings.syncUrl) return;
     // A hidden tab normally has nothing worth watching — unless a stop is armed, in which case
@@ -6172,6 +6419,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (e.target.closest('[data-neworder]') && !RO) orderDialog();
     const ss = e.target.closest('[data-softstop]'); if (ss && !RO) armStopDialog(ss.dataset.softstop);
     const ld = e.target.closest('[data-ladder]'); if (ld && !RO) ladderDialog(ld.dataset.ladder);
+    if (e.target.closest('[data-lqimport]') && !RO) liquidImport();
     const del = e.target.closest('[data-del]'); if (del && !RO) { S.trades = S.trades.filter(t => t.id !== del.dataset.del); persist(); renderAll(); toast('Trade deleted.'); }
   });
   $$('.overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) closeModals(); }));
@@ -6222,7 +6470,13 @@ if (typeof module !== 'undefined') module.exports = AN;
     document.body.classList.add('ro'); $('#ro-banner').classList.remove('hidden'); $('#ro-banner span').textContent = `Read-only snapshot exported ${new Date(p.exported).toLocaleString()}. Nothing here can be edited or saved.`;
   } else {
     const saved = store.load();
-    if (saved) { if (Array.isArray(saved.trades)) S.trades = saved.trades.map(t => ({ ...t, kind: t.kind || 'trade', id: t.id || C.tradeKey(t) })); if (saved.theme) S.theme = saved.theme; if (saved.settings) S.settings = { ...S.settings, ...saved.settings }; if (saved.activity) S.activity = saved.activity; if (saved.activityJson) S.activityJson = saved.activityJson; if (saved.section && SECTIONS.some(x => x[0] === saved.section)) S.section = saved.section; }
+    if (saved) { if (Array.isArray(saved.trades)) S.trades = saved.trades.map(t => ({ ...t, kind: t.kind || 'trade', id: t.id || C.tradeKey(t) })); if (saved.theme) S.theme = saved.theme; if (saved.settings) S.settings = { ...S.settings, ...saved.settings }; if (saved.activity) S.activity = saved.activity; if (saved.activityJson) S.activityJson = saved.activityJson; if (saved.section && SECTIONS.some(x => x[0] === saved.section)) S.section = saved.section;
+      if (saved.books && typeof saved.books === 'object') S.books = saved.books;
+      if (saved.lq && typeof saved.lq === 'object') S.lq = saved.lq;
+      // the active venue is restored last, because loading its book overwrites what came before
+      if (saved.venue && VENUES.some(x => x[0] === saved.venue) && saved.venue !== 'ig') {
+        S.venue = saved.venue; bookIn((saved.books || {})[saved.venue]);
+      } }
     applyActivity();
   }
   applyTheme(); setSide('BUY');

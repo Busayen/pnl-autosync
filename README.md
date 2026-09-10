@@ -100,6 +100,38 @@ open/close timestamps, `stop`, and open/close levels.
 
 ---
 
+## Two books: IG and Liquid
+
+The dropdown beside the Ledger mark switches the whole dashboard between two accounts. They share
+nothing — separate trades, separate calendar, separate statistics, separate filters, separate
+everything. Netting them would make every number on the page meaningless: different broker,
+different currency, and one of them is leveraged perpetuals.
+
+Switching away stores the book you left; switching back restores it exactly. Both are saved.
+
+The **Risk** tab is not offered on Liquid. It is built on stop levels and session capital, and a
+perpetuals venue reports neither, so it could only ever be blank.
+
+### Getting Liquid data in
+
+Liquid runs on Hyperliquid, and this page is static with no credentials for it, so the data arrives
+the way everything else here does: you paste it. **Paste Liquid data** takes either blob, or both:
+
+- the **portfolio** blob (`account` and `positions`) → open positions, equity, margin
+- the **history** blob (`rows`) → realised P&L
+
+Positions replace what is there. Fills are merged, and a fill already imported is skipped rather
+than counted twice.
+
+A fill is not a trade. Only the closing half has a result — and Liquid reports that result exactly,
+so the entry behind it is *recovered* rather than guessed: `closedPnl = (close − open) × size` for a
+long, and the mirror for a short. Two closes off the same entry both resolve to the same open price,
+which is how you know it is right. Each closed trade is recorded net of its closing fee; an opening
+fill has no result yet but its fee is already paid, so that lands on its own day as a cost.
+
+Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
+those live on Liquid.
+
 ## The five sections
 
 Switch with the tabs in the header, keys `1`–`5`, or `⌘K` / `Ctrl+K`.

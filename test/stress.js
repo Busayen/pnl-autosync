@@ -87,6 +87,102 @@ async function boot(browser) {
   await ctx.close();
 }
 
+// IG and Liquid are two books that must not touch. The venue switch is only worth having if
+// switching away preserves what you left and switching back brings it back exactly.
+const LQ_PORTFOLIO = {"account":{"equity":"82.62","margin_used":"81.943019","available_balance":"0.68","username":"busayen"},
+  "positions":[{"symbol":"xyz:CL-PERP","side":"long","size":"14.183","entryPx":"94.479","markPx":"95.465",
+    "leverage":"20","leverageType":"isolated","unrealizedPnl":"14.207767","liquidationPx":"92.0035364837",
+    "marginUsed":"81.943019","returnOnEquity":"0.2120563416","tp":"99.203","sl":"94.637","displayName":"WTIOIL"}]};
+// two closes of the same 95.104 entry, plus an opening fill that is only a fee so far
+const LQ_HISTORY = {"rows":[
+  {"time":"2026-09-10T03:00:41.256Z","asset":"WTIOIL","side":"buy","direction":"Open Long","size":"3.599","price":"94.48","fee":"0.199394","txHash":"0xaaa"},
+  {"time":"2026-09-10T01:54:59.646Z","asset":"WTIOIL","side":"sell","direction":"Close Long","size":"10.828","price":"94.67","fee":"0.60111","closedPnl":"-4.699352","txHash":"0xbbb"},
+  {"time":"2026-09-10T01:54:59.646Z","asset":"WTIOIL","side":"sell","direction":"Close Long","size":"5.155","price":"94.671","fee":"0.286179","closedPnl":"-2.232115","txHash":"0xbbb"}]};
+
+async function venues(browser) {
+  const { ctx, page, logs } = await newPage(browser);
+  await loadDemo(page);
+  const igCount = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length);
+  check('the account picker offers both books',
+    (await page.evaluate(() => Array.from(document.querySelectorAll('#venue option')).map(o => o.value))).join(',') === 'ig,liquid');
+
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(500);
+  const view = await page.evaluate(() => ({
+    lqHero: !document.querySelector('#lq-hero').classList.contains('hidden'),
+    igHero: !document.querySelector('#hero').classList.contains('hidden'),
+    secs: Array.from(document.querySelectorAll('#subnav .snav')).map(b => b.dataset.section),
+  }));
+  check('switching to Liquid opens an empty book', view.lqHero && !view.igHero, JSON.stringify(view));
+  check('and drops the Risk tab, which has nothing to show for perpetuals',
+    !view.secs.includes('risk') && view.secs.includes('overview'), JSON.stringify(view.secs));
+
+  const paste = async blob => {
+    await page.evaluate(() => document.querySelector('[data-lqimport]').click());
+    await page.waitForTimeout(250);
+    await page.fill('#lq-json', JSON.stringify(blob));
+    await page.waitForTimeout(250);
+    const note = await page.evaluate(() => document.querySelector('#lq-note').innerText.replace(/\s+/g, ' '));
+    await page.evaluate(() => document.querySelector('[data-lqgo]').click());
+    await page.waitForTimeout(500);
+    return note;
+  };
+  const n1 = await paste(LQ_PORTFOLIO);
+  check('pasting the portfolio blob reads its positions', /1 open position/.test(n1), n1);
+  const n2 = await paste(LQ_HISTORY);
+  check('pasting the history blob reads its fills', /2 closed trades/.test(n2), n2);
+  check('and counts the opening fill as a fee, not a trade', /1 fee/.test(n2), n2);
+
+  const book = await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    return { trades: s.trades.filter(t => t.kind === 'trade'), costs: s.trades.filter(t => t.kind === 'cost').length,
+             positions: (s.lq.positions || []).length, igKept: (s.books.ig && s.books.ig.trades || []).length };
+  });
+  check('the position is stored', book.positions === 1);
+  check('closes become trades and the opening fee a cost', book.trades.length === 2 && book.costs === 1,
+    JSON.stringify({ t: book.trades.length, c: book.costs }));
+  // closedPnl is exact, so the entry behind it is recoverable: both closes came off 95.104
+  check('the entry price is recovered from the realised P&L, not guessed',
+    book.trades.every(t => Math.abs(t.openLevel - 95.104) < 0.001), JSON.stringify(book.trades.map(t => t.openLevel)));
+  check('P&L is net of the closing fee',
+    Math.abs(book.trades.find(t => t.closeLevel === 94.67).pnl - (-5.30)) < 0.01,
+    JSON.stringify(book.trades.map(t => t.pnl)));
+  check('the IG book is untouched by any of it', book.igKept === igCount, `${book.igKept} vs ${igCount}`);
+
+  const n3 = await paste(LQ_HISTORY);
+  check('pasting the same history again finds nothing new', /nothing new|0 closed/i.test(n3), n3);
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length);
+  check('so nothing is double counted', after === 3, `${after} rows`);
+
+  // the whole analytics stack should be running off the Liquid book now
+  await page.evaluate(() => document.querySelector('[data-section="overview"]').click());
+  await page.waitForTimeout(500);
+  check('Liquid gets its own calendar', (await page.evaluate(() => document.querySelectorAll('#cal .day.has').length)) >= 1);
+  // −5.30 and −2.52 from the two closes, and −0.20 for the opening fill's fee: the cost record
+  // has to land in the total too, or fees would quietly vanish from the calendar
+  check('and its own P&L, not IG\'s — fees included',
+    /8\.02/.test(await page.evaluate(() => document.querySelector('#cal-sum').innerText)),
+    await page.evaluate(() => document.querySelector('#cal-sum').innerText.replace(/\s+/g, ' ')));
+
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(500);
+  check('switching back restores IG exactly',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length)) === igCount);
+  check('and IG keeps its Risk tab',
+    (await page.evaluate(() => Array.from(document.querySelectorAll('#subnav .snav')).map(b => b.dataset.section))).includes('risk'));
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  check('the venue is remembered across a reload',
+    (await page.evaluate(() => document.body.dataset.venue)) === 'ig');
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(600);
+  check('and so is the Liquid book',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length)) === 3);
+  check('no console errors switching books', logs.length === 0, logs.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
 async function parsing(browser) {
   const { ctx, page } = await newPage(browser);
   const r = await page.evaluate(() => {
@@ -342,7 +438,7 @@ async function a11y(browser) {
   try {
     for (const [label, fn] of [['boot', boot], ['parsing', parsing], ['injection', injection],
       ['exports', b => exportsAndSecrets(b, tmp)], ['layout', layout], ['palette', palette],
-      ['storage + form', storageAndForm], ['accessibility', a11y]]) {
+      ['storage + form', storageAndForm], ['accessibility', a11y], ['venues', venues]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 120)); }
