@@ -1264,6 +1264,10 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
         <div class="field full"><label for="s-tags">Setup tags</label><input type="text" id="s-tags" placeholder="Breakout, Pullback, Reversal"><div class="help">Comma-separated. Assign them from the Setup column in the trade table; the Performance section then breaks P&amp;L down by setup.</div></div>
         <div class="field full"><label for="s-dateorder">Ambiguous dates in imports</label><select id="s-dateorder"><option value="auto">Detect (defaults to day/month/year)</option><option value="dmy">Day / month / year</option><option value="mdy">Month / day / year</option></select></div>
         <div class="field full"><label for="s-syncurl">IG sync worker URL</label><input type="text" id="s-syncurl" placeholder="https://ig-sync.yourname.workers.dev"><div class="help" id="s-syncstatus"></div></div>
+        <div class="field full"><label for="s-lqurl">Liquid sync URL</label><input type="text" id="s-lqurl" placeholder="https://ig-sync.yourname.workers.dev/liquid">
+          <div class="help">Anything that answers with Liquid's own shapes — <code>positions</code>, <code>rows</code>, or both. Polled while the Liquid book is open. Leave it blank and you paste instead.</div></div>
+        <div class="field"><label for="s-lqtoken">Liquid sync token</label><input type="password" id="s-lqtoken" placeholder="optional" autocomplete="off"><div class="help">Sent as a bearer token, if your endpoint wants one.</div></div>
+        <div class="field"><label for="s-lqsecs">Liquid refresh (seconds)</label><input type="number" id="s-lqsecs" min="5" step="1"><div class="help">Positions move with the price; realised history barely changes. 15s is plenty.</div></div>
         <div class="field"><label for="s-synctoken">Sync token</label><input type="password" id="s-synctoken" placeholder="the SYNC_TOKEN you set on the worker"><div class="help">Reads history only. Not your IG password, which stays at Cloudflare.</div></div>
         <div class="field"><label for="s-syncdays">Sync range (days back)</label><input type="number" id="s-syncdays" placeholder="180" min="1" max="1095" step="1"></div>
         <div class="full switch"><div class="txt">Auto-refresh open positions<small>Polls only the positions endpoint. A full history sync runs when a position closes, when you return to the tab, and every five minutes.</small></div><button class="sw" id="s-autosync" data-act="toggle-costs" role="switch" aria-label="Auto-refresh"></button></div>
@@ -2347,7 +2351,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.2.0';
+  const APP_VERSION = 'v9.3.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2376,13 +2380,14 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', liquidUrl: '', liquidToken: '', liquidAuto: true, liquidSecs: 15, fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
     cmp: { a: '30d', b: 'p30d', af: '', at: '', bf: '', bt: '' },
     pending: null, activity: null, activityJson: null, activityMeta: null,
     venue: 'ig', books: {}, lq: { positions: [], account: null, fetched: null },
+    lqBusy: false, lqError: null,
     positions: null, posFetched: null, posError: null, posBusy: false,
     orders: null, ordFetched: null, ordError: null, ordBusy: false, ordAt: 0,
   };
@@ -2516,7 +2521,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     const s = S.trades.length ? C.computeStats(S.trades) : null; const code = currencyCode();
     // brand status removed: the filter bar already shows the trade count and date range
     $('#btn-export').disabled = !S.trades.length;
-    $('#btn-sync').classList.toggle('hidden', RO || !S.settings.syncUrl || S.venue !== 'ig');
+    $('#btn-sync').classList.toggle('hidden', RO
+      || (S.venue === 'ig' ? !S.settings.syncUrl : !S.settings.liquidUrl));
     $('#subnav').innerHTML = sectionsFor(S.venue).map(([k, l, short]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}"><span class="lbl-full">${l}</span><span class="lbl-short">${short || l}</span></button>`).join('');
     $$('#subnav [data-section]').forEach(b => b.addEventListener('click', () => setSection(b.dataset.section)));
     renderVenue();
@@ -5640,6 +5646,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     killCharts();
     renderAll();
     renderVenue();
+    clearTimeout(lqTimer);
+    if (v === 'liquid') startLiquid(); else startAuto();
   }
   function renderVenue() {
     const el = $('#venue'); if (!el) return;
@@ -5712,6 +5720,76 @@ if (typeof module !== 'undefined') module.exports = AN;
     return { positions, rows, account };
   }
 
+  // One merge, whether the JSON was pasted or fetched. Positions replace; fills are added only if
+  // their reference is new, so a poll that returns the same window over and over adds nothing.
+  function applyLiquid(parsed) {
+    S.lq = S.lq || emptyLq();
+    if (parsed.positions) {
+      S.lq.positions = lqPositions(parsed.positions);
+      S.lq.account = parsed.account || S.lq.account;
+    }
+    let added = 0;
+    if (parsed.rows) {
+      const have = new Set(S.trades.map(x => x.reference));
+      const fresh = liquidRecords(parsed.rows).filter(r => !have.has(r.reference));
+      if (fresh.length) {
+        S.trades = S.trades.concat(fresh.map(t => ({ ...t, id: C.tradeKey(t) })))
+          .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      }
+      added = fresh.filter(t => t.kind === 'trade').length;
+    }
+    S.lq.fetched = new Date().toISOString();
+    return added;
+  }
+
+  // Autosync. The endpoint is whatever answers with Liquid's own shapes — a worker route, a proxy,
+  // anything. This page holds no Liquid credentials of its own; the URL is the whole contract.
+  let lqTimer = null, lqFails = 0;
+  async function syncLiquid(silent) {
+    const cfg = S.settings;
+    if (!cfg.liquidUrl) { if (!silent) { toast('No Liquid sync URL set. Add one in Settings, or paste instead.'); openSettings(); } return; }
+    if (S.lqBusy) return;
+    S.lqBusy = true; S.lqError = null;
+    if (S.venue === 'liquid' && S.section === 'open') renderLiquidOpen();
+    try {
+      const res = await fetch(cfg.liquidUrl, { headers: cfg.liquidToken ? { Authorization: `Bearer ${cfg.liquidToken}` } : {} });
+      const text = await res.text();
+      if (!res.ok) {
+        let why = `HTTP ${res.status}`;
+        try { why = JSON.parse(text).error || why; } catch { /* not JSON, keep the status */ }
+        throw new Error(why);
+      }
+      const added = applyLiquid(readLiquid(text));
+      lqFails = 0;
+      persist();
+      if (S.venue === 'liquid') { killCharts(); renderAll(); }
+      if (!silent && added) toast(`Liquid: ${plural(added, 'new trade')}.`, 6000);
+      else if (!silent) toast('Liquid is up to date.', 4000);
+    } catch (e) {
+      lqFails++;
+      S.lqError = String(e.message || e);
+      if (S.venue === 'liquid' && S.section === 'open') renderLiquidOpen();
+      if (!silent) toast(`Liquid sync failed: ${S.lqError}`, 9000);
+    } finally {
+      S.lqBusy = false;
+      if (S.venue === 'liquid' && S.section === 'open') renderLiquidOpen();
+      scheduleLiquid();
+    }
+  }
+  function scheduleLiquid() {
+    clearTimeout(lqTimer);
+    if (RO || S.venue !== 'liquid' || !S.settings.liquidUrl || S.settings.liquidAuto === false) return;
+    // nothing here is armed to act, so a hidden tab has no reason to keep asking
+    if (document.hidden) return;
+    const base = Math.max(5, parseInt(S.settings.liquidSecs) || 15) * 1000;
+    lqTimer = setTimeout(() => syncLiquid(true), lqFails ? Math.min(base * Math.pow(2, lqFails), 120000) : base);
+  }
+  function startLiquid() {
+    clearTimeout(lqTimer);
+    if (RO || S.venue !== 'liquid' || !S.settings.liquidUrl || S.settings.liquidAuto === false) return;
+    syncLiquid(true);
+  }
+
   function liquidImport() {
     if (RO) return;
     const wrap = document.createElement('div');
@@ -5767,10 +5845,9 @@ if (typeof module !== 'undefined') module.exports = AN;
         S.lq.account = parsed.account || S.lq.account;
         S.lq.fetched = new Date().toISOString();
       }
-      const added = (parsed.fresh || []).map(t => ({ ...t, id: C.tradeKey(t) }));
-      if (added.length) S.trades = S.trades.concat(added).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      const n = applyLiquid(parsed);
       persist(); done(); killCharts(); renderAll();
-      toast(`Liquid: ${plural(added.filter(t => t.kind === 'trade').length, 'trade')} imported, `
+      toast(`Liquid: ${plural(n, 'trade')} imported, `
         + `${plural((S.lq && S.lq.positions || []).length, 'open position')} held.`, 8000);
     });
   }
@@ -5784,17 +5861,27 @@ if (typeof module !== 'undefined') module.exports = AN;
     const usd = v => (v == null ? '—' : (v < 0 ? '−' : '') + 'US$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
     const net = ps.reduce((a, p) => a + (p.pnl || 0), 0);
     const stamp = S.lq && S.lq.fetched ? new Date(S.lq.fetched) : null;
+    const cfg = S.settings;
+    const auto = !!cfg.liquidUrl && cfg.liquidAuto !== false;
+    const head = `<span class="live ${S.lqError ? 'bad' : ''}">${S.lqError ? 'Sync error'
+      : S.lqBusy ? 'Syncing…'
+      : auto ? `<i></i>Live · every ${Math.max(5, parseInt(cfg.liquidSecs) || 15)}s`
+      : cfg.liquidUrl ? 'Auto-refresh off' : 'Pasted by hand'}</span>`;
+    const tools = `<div class="tbl-tools">${cfg.liquidUrl ? '<button class="btn sm edit" data-lqsync>Sync now</button>' : ''}<button class="btn ghost sm edit" data-lqimport>Paste</button>${head}</div>`;
+    const wire = () => {
+      const i = el.querySelector('[data-lqimport]'); if (i) i.addEventListener('click', liquidImport);
+      const y = el.querySelector('[data-lqsync]'); if (y) y.addEventListener('click', () => syncLiquid(false));
+    };
+    const errBox = S.lqError ? `<div class="notice" style="margin-bottom:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(S.lqError)}</div></div>` : '';
     if (!ps.length) {
-      el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>From Liquid</small></div>
-        <button class="btn sm edit" data-lqimport>Paste Liquid data</button></div>
-        <div class="card-body dim" style="font-size:12px">Nothing imported yet. Paste the portfolio blob and your open positions appear here.</div></div>`;
-      const b = el.querySelector('[data-lqimport]'); if (b) b.addEventListener('click', liquidImport);
+      el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>From Liquid</small></div>${tools}</div>
+        <div class="card-body">${errBox}<div class="dim" style="font-size:12px">Nothing here yet. ${cfg.liquidUrl ? 'Waiting on the first sync.' : 'Paste the portfolio blob, or set a Liquid sync URL in Settings.'}</div></div></div>`;
+      wire();
       return;
     }
     el.innerHTML = `<div class="card"><div class="card-head">
-        <div class="card-title">Open positions<small>From Liquid${stamp ? ` · pasted ${stamp.toLocaleString()}` : ''}</small></div>
-        <button class="btn sm edit" data-lqimport>Paste Liquid data</button></div>
-      <div class="card-body">
+        <div class="card-title">Open positions<small>From Liquid${stamp ? ` · ${stamp.toLocaleTimeString()}` : ''}</small></div>${tools}</div>
+      <div class="card-body">${errBox}
         <div class="stat-row" style="padding-bottom:12px">
           <div><span class="k">Unrealised</span><b class="${cls(net)}">${usd(net)}</b><span class="k">${plural(ps.length, 'position')}</span></div>
           ${acc ? `<div><span class="k">Equity</span><b>${usd(lqNum(acc.equity) ?? lqNum(acc.account_value))}</b><span class="k">${acc.username ? esc(String(acc.username)) : ''}</span></div>
@@ -5813,7 +5900,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         </tbody></table></div>
         <div class="dim" style="font-size:11px;margin-top:10px">A mirror of what Liquid shows, pasted in. Nothing here can open, close or change a position — those live on Liquid.</div>
       </div></div>`;
-    const b = el.querySelector('[data-lqimport]'); if (b) b.addEventListener('click', liquidImport);
+    wire();
   }
 
   function renderAll() {
@@ -5954,7 +6041,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!anyArmed() && !anyLadder()) clearTimeout(pollTimer); }
-    else startAuto();                                              // catch up on returning to the tab
+    else if (S.venue === 'liquid') startLiquid(); else startAuto(); // catch up on returning to the tab
   });
 
   function applyActivity() {
@@ -6033,7 +6120,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     if (t.startsWith('{') || t.startsWith('[')) {
       try { const obj = JSON.parse(t); const trades = Array.isArray(obj) ? obj : obj.trades; if (!Array.isArray(trades)) throw 0;
-        if (obj.settings) { const { syncUrl, syncToken, closeToken, orderToken, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
+        if (obj.settings) { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
         const norm = trades.map(x => ({ ...x, kind: x.kind || 'trade', id: x.id || C.tradeKey(x) }));
         // backups may hold several accounts: restore as a whole
         S.pending = null; S.trades = norm; S.selectedDay = null; if (obj.activity) S.activity = obj.activity; applyActivity(); persist(); closeModals(); renderAll(); toast(`Restored ${plural(norm.filter(x => x.kind === 'trade').length, 'trade')} from backup. Previous data replaced.`); return;
@@ -6091,6 +6178,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         v.loss.toLowerCase() === $('#s-loss-color').value.toLowerCase()) || ['custom'])[0]; };
     $('#s-profit-color').oninput = onPick; $('#s-loss-color').oninput = onPick; $('#s-riskcap').value = s.riskCapPct === 0 || s.riskCapPct ? s.riskCapPct : 50;
     $('#s-syncurl').value = s.syncUrl || ''; $('#s-synctoken').value = s.syncToken || ''; $('#s-syncdays').value = s.syncDays || 180;
+    $('#s-lqurl').value = s.liquidUrl || ''; $('#s-lqtoken').value = s.liquidToken || ''; $('#s-lqsecs').value = s.liquidSecs || 15;
     $('#s-autosync').classList.toggle('on', s.autoSync !== false);
     $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || ''; $('#s-ordertoken').value = s.orderToken || '';
     const ccys = fxCurrencies(), acctC = accountCcy() || 'your currency', seen = igRatesSeen();
@@ -6116,6 +6204,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     s.lossColor = nl.toLowerCase() === dp.loss ? '' : nl;
     applyColors(); s.riskCapPct = $('#s-riskcap').value.trim() === '' ? 0 : parseFloat($('#s-riskcap').value) || 0;
     s.syncUrl = $('#s-syncurl').value.trim(); s.syncToken = $('#s-synctoken').value.trim(); s.syncDays = parseInt($('#s-syncdays').value) || 180;
+    s.liquidUrl = $('#s-lqurl').value.trim(); s.liquidToken = $('#s-lqtoken').value.trim();
+    s.liquidSecs = Math.max(5, parseInt($('#s-lqsecs').value) || 15);
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();
     s.orderToken = $('#s-ordertoken').value.trim();
@@ -6282,7 +6372,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   // Never let sync credentials leave the browser inside a shared file. The token grants access
   // to the worker, and therefore to the IG account behind it.
-  const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, ...rest } = S.settings || {}; return rest; };
+  const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, ...rest } = S.settings || {}; return rest; };
 
   function exportSnapshot() {
     const payload = { exported: new Date().toISOString(), trades: S.trades, settings: safeSettings(), theme: S.theme, filters: S.f, section: S.section, activity: S.activity, label: `${rangeLabel(D.tr)}` };
@@ -6397,7 +6487,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       else if (a === 'settings') openSettings();
       else if (a === 'poll-now') { pollFails = 0; fetchPositions(); }
       else if (a === 'settings') openSettings();
-      else if (a === 'sync') runSync(false); else if (a === 'save-settings') saveSettings();
+      else if (a === 'sync') { if (S.venue === 'liquid') syncLiquid(false); else runSync(false); }
+      else if (a === 'save-settings') saveSettings();
       else if (a === 'demo') review({ trades: demoTrades(), stats: { trades: 25, costs: 0, cash: 1, unreadable: 0 }, error: '', columns: {} }, 'demo', 'Demo');
       else if (a === 'export') download(`trades-${today}.csv`, csv(S.trades)); else if (a === 'export-rows') download(`trades-filtered-${today}.csv`, csv(renderTable.rows || []));
       else if (a === 'snapshot') exportSnapshot();
@@ -6480,7 +6571,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     applyActivity();
   }
   applyTheme(); setSide('BUY');
-  setTimeout(startAuto, 400);
+  setTimeout(() => { if (S.venue === 'liquid') startLiquid(); else startAuto(); }, 400);
   if (S.trades.length && !S.trades.some(t => t.date.startsWith(today.slice(0, 7)))) { const l = S.trades.filter(t => t.kind !== 'cash').reduce((a, t) => t.date > a ? t.date : a, ''); if (l) S.cal = { y: +l.slice(0, 4), m: +l.slice(5, 7) - 1 }; }
   renderAll();
 })();

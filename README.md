@@ -132,6 +132,24 @@ fill has no result yet but its fee is already paid, so that lands on its own day
 Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
 those live on Liquid.
 
+### Autosync
+
+Set a **Liquid sync URL** in Settings and the pasting stops. Anything that answers with those same
+shapes will do — a worker route, a proxy, anything. The page holds no Liquid credentials of its
+own; the URL is the whole contract, and an optional token is sent as a bearer if your endpoint
+wants one.
+
+It polls only while the Liquid book is open and the tab is visible: nothing here is armed to act,
+so a hidden tab has no reason to keep asking. Fifteen seconds is the default and is plenty —
+positions move with the price, realised history barely changes. A fill already imported is skipped,
+so polling the same window forever adds nothing.
+
+A failing endpoint is reported on the card rather than left to look live, backs off rather than
+being hammered, keeps what it already had, and recovers on its own when the endpoint does.
+
+The URL and its token are treated as secrets exactly like IG's: stripped from snapshots and
+backups, and never written into an export.
+
 ## The five sections
 
 Switch with the tabs in the header, keys `1`–`5`, or `⌘K` / `Ctrl+K`.

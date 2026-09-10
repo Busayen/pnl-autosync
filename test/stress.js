@@ -251,6 +251,8 @@ async function exportsAndSecrets(browser, tmp) {
     const s = JSON.parse(localStorage.getItem('ledger:v4'));
     s.settings.syncUrl = 'https://canary.example.workers.dev';
     s.settings.syncToken = 'CANARY-TOKEN-DO-NOT-SHARE';
+    s.settings.liquidUrl = 'https://canary-liquid.example.workers.dev/liquid';
+    s.settings.liquidToken = 'CANARY-LIQUID-DO-NOT-SHARE';
     localStorage.setItem('ledger:v4', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'load' });
@@ -264,6 +266,8 @@ async function exportsAndSecrets(browser, tmp) {
     const txt = fs.readFileSync(snap, 'utf8');
     check('snapshot carries no sync token', !txt.includes('CANARY-TOKEN-DO-NOT-SHARE'));
     check('snapshot carries no worker URL', !txt.includes('canary.example.workers.dev'));
+    check('snapshot carries no Liquid token', !txt.includes('CANARY-LIQUID-DO-NOT-SHARE'));
+    check('snapshot carries no Liquid URL', !txt.includes('canary-liquid.example.workers.dev'));
     // and it must still open as a working read-only page
     fs.copyFileSync(snap, path.join(path.dirname(FILE), '__snap_test.html'));
     const { ctx: c2, page: p2, logs: l2 } = await newPage(browser, undefined, `http://localhost:${PORT}/__snap_test.html`);

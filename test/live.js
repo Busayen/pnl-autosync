@@ -31,6 +31,18 @@ function serve(dir) {
     if (p === '/orders') { calls.push({ p });
       return json(200, { fetched: new Date().toISOString(), orders: state.orders || [] }); }
     if (p === '/sync') { calls.push({ p }); return json(200, { account: 'IG', transactions: [], activity: [] }); }
+    if (p === '/liquid') {
+      calls.push({ p, auth: req.headers.authorization || null });
+      if (state.lqStatus && state.lqStatus !== 200) return json(state.lqStatus, { error: 'liquid upstream is down' });
+      return json(200, {
+        account: { equity: '82.62', margin_used: '81.94', available_balance: '0.68', username: 'busayen' },
+        positions: [{ symbol: 'xyz:CL-PERP', side: 'long', size: '14.183', entryPx: '94.479',
+          markPx: String(state.lqMark || 95.465), leverage: '20', leverageType: 'isolated',
+          unrealizedPnl: String(state.lqPnl == null ? 14.2 : state.lqPnl), liquidationPx: '92.0035',
+          marginUsed: '81.94', returnOnEquity: '0.212', tp: '99.203', sl: '94.637', displayName: 'WTIOIL' }],
+        rows: (state.lqRows || []),
+      });
+    }
     if (p === '/markets') {
       const q = (new URL(req.url, 'http://x').searchParams.get('q') || '').toLowerCase();
       calls.push({ p, q });
@@ -1394,6 +1406,75 @@ async function multiPosition(browser) {
   await p2.context().close();
 }
 
+// The Liquid book has no credentials of its own — a URL that answers with Liquid's shapes is the
+// whole contract. What matters is that polling it adds new fills once and only once, and that a
+// broken endpoint says so rather than quietly showing stale numbers as if they were live.
+const LQ_CLOSE = (px, pnl, hash) => ({ time: '2026-09-10T01:54:59.646Z', asset: 'WTIOIL', side: 'sell',
+  direction: 'Close Long', size: '10.828', price: String(px), fee: '0.60111', closedPnl: String(pnl), txHash: hash });
+
+async function liquidSync(browser) {
+  state = { orders: [], positions: [], lqRows: [LQ_CLOSE(94.67, -4.699352, '0xbbb')] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`;
+    s.settings.liquidToken = 'LQTOK'; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1200);
+  const book = () => page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    return { trades: s.trades.filter(t => t.kind === 'trade').length, positions: (s.lq.positions || []).length }; });
+  const hits = () => calls.filter(c => c.p === '/liquid');
+
+  check('the IG book does not poll Liquid', hits().length === 0, `${hits().length} calls`);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(1500);
+  check('opening the Liquid book syncs it without a paste', hits().length >= 1, `${hits().length} calls`);
+  const b1 = await book();
+  check('positions arrive', b1.positions === 1, JSON.stringify(b1));
+  check('and so does the realised history', b1.trades === 1, JSON.stringify(b1));
+  check('the token is sent as a bearer', /^Bearer LQTOK$/.test((hits()[0] || {}).auth || ''), (hits()[0] || {}).auth);
+
+  await page.evaluate(() => document.querySelector('[data-section="open"]').click());
+  await page.waitForTimeout(500);
+  check('the card says it is live',
+    /Live/.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+
+  // the same window comes back on every poll; it must not pile up
+  const n1 = hits().length;
+  await page.waitForTimeout(7000);
+  check('it keeps polling', hits().length > n1, `${n1} -> ${hits().length}`);
+  check('but re-reading the same fills adds nothing', (await book()).trades === 1, JSON.stringify(await book()));
+
+  state.lqRows = [LQ_CLOSE(94.67, -4.699352, '0xbbb'), LQ_CLOSE(96.2, 8.4, '0xddd')];
+  await page.waitForTimeout(7000);
+  check('a genuinely new fill is picked up', (await book()).trades === 2, JSON.stringify(await book()));
+
+  state.lqStatus = 502;
+  await page.waitForTimeout(8000);
+  check('a broken endpoint is reported, not hidden',
+    /error/i.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+  check('and what it already had is kept', (await book()).trades === 2);
+  const n2 = hits().length;
+  await page.waitForTimeout(6000);
+  check('a failing endpoint is backed off, not hammered', hits().length - n2 <= 2, `${hits().length - n2} calls in 6s`);
+
+  state.lqStatus = 0;
+  await page.waitForTimeout(9000);
+  check('and it recovers on its own once the endpoint does',
+    !/error/i.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+
+  const n3 = hits().length;
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(6000);
+  check('switching back to IG stops the Liquid poll', hits().length - n3 <= 1, `${hits().length - n3} calls after leaving`);
+
+  check('no page errors through Liquid autosync', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1411,7 +1492,7 @@ async function multiPosition(browser) {
       ['app-side stops', appSideStops], ['trailing stops', trailingStops],
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
       ['averaging ladder', averagingLadder], ['market search', marketSearch],
-      ['two positions on one market', multiPosition],
+      ['two positions on one market', multiPosition], ['liquid autosync', liquidSync],
       ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;
