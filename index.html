@@ -1264,8 +1264,14 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
         <div class="field full"><label for="s-tags">Setup tags</label><input type="text" id="s-tags" placeholder="Breakout, Pullback, Reversal"><div class="help">Comma-separated. Assign them from the Setup column in the trade table; the Performance section then breaks P&amp;L down by setup.</div></div>
         <div class="field full"><label for="s-dateorder">Ambiguous dates in imports</label><select id="s-dateorder"><option value="auto">Detect (defaults to day/month/year)</option><option value="dmy">Day / month / year</option><option value="mdy">Month / day / year</option></select></div>
         <div class="field full"><label for="s-syncurl">IG sync worker URL</label><input type="text" id="s-syncurl" placeholder="https://ig-sync.yourname.workers.dev"><div class="help" id="s-syncstatus"></div></div>
-        <div class="field full"><label for="s-lqurl">Liquid sync URL</label><input type="text" id="s-lqurl" placeholder="https://ig-sync.yourname.workers.dev/liquid">
-          <div class="help">Anything that answers with Liquid's own shapes — <code>positions</code>, <code>rows</code>, or both. Polled while the Liquid book is open. Leave it blank and you paste instead.</div></div>
+        <div class="field full"><label for="s-lqaddr">Liquid wallet address</label><input type="text" id="s-lqaddr" placeholder="0x…" spellcheck="false" autocomplete="off">
+          <div class="help">Hyperliquid's info endpoint is public and takes an address and nothing else, so with this set the page reads
+            your account directly and needs no worker. Whether a browser is allowed to call it depends on their CORS headers; if it is
+            refused the sync says so, and a proxy URL below is the way round.</div></div>
+        <div class="field"><label for="s-lqdex">Builder prefix</label><input type="text" id="s-lqdex" placeholder="xyz" spellcheck="false" autocomplete="off">
+          <div class="help">The bit before the colon in <code>xyz:CL-PERP</code>. Without it Hyperliquid answers for its main perp dex and returns nothing.</div></div>
+        <div class="field full"><label for="s-lqurl">Liquid sync URL <span class="dim">(instead of the address)</span></label><input type="text" id="s-lqurl" placeholder="https://ig-sync.yourname.workers.dev/liquid">
+          <div class="help">Anything that answers with Liquid's own shapes — <code>positions</code>, <code>rows</code>, or both. Takes precedence over the address above. Leave both blank and you paste by hand.</div></div>
         <div class="field"><label for="s-lqtoken">Liquid sync token</label><input type="password" id="s-lqtoken" placeholder="optional" autocomplete="off"><div class="help">Sent as a bearer token, if your endpoint wants one.</div></div>
         <div class="field"><label for="s-lqsecs">Liquid refresh (seconds)</label><input type="number" id="s-lqsecs" min="5" step="1"><div class="help">Positions move with the price; realised history barely changes. 15s is plenty.</div></div>
         <div class="field"><label for="s-synctoken">Sync token</label><input type="password" id="s-synctoken" placeholder="the SYNC_TOKEN you set on the worker"><div class="help">Reads history only. Not your IG password, which stays at Cloudflare.</div></div>
@@ -2351,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.3.0';
+  const APP_VERSION = 'v9.4.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2380,7 +2386,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', liquidUrl: '', liquidToken: '', liquidAuto: true, liquidSecs: 15, fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', liquidUrl: '', liquidToken: '', liquidAddress: '', liquidDex: 'xyz', liquidAuto: true, liquidSecs: 15, fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -2522,7 +2528,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     // brand status removed: the filter bar already shows the trade count and date range
     $('#btn-export').disabled = !S.trades.length;
     $('#btn-sync').classList.toggle('hidden', RO
-      || (S.venue === 'ig' ? !S.settings.syncUrl : !S.settings.liquidUrl));
+      || (S.venue === 'ig' ? !S.settings.syncUrl : !lqSourced()));
     $('#subnav').innerHTML = sectionsFor(S.venue).map(([k, l, short]) => `<button class="snav ${S.section === k ? 'active' : ''}" data-section="${k}"><span class="lbl-full">${l}</span><span class="lbl-short">${short || l}</span></button>`).join('');
     $$('#subnav [data-section]').forEach(b => b.addEventListener('click', () => setSection(b.dataset.section)));
     renderVenue();
@@ -5745,21 +5751,75 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Autosync. The endpoint is whatever answers with Liquid's own shapes — a worker route, a proxy,
   // anything. This page holds no Liquid credentials of its own; the URL is the whole contract.
   let lqTimer = null, lqFails = 0;
+  const lqAddr = () => { const a = String(S.settings.liquidAddress || '').trim();
+    return /^0x[0-9a-fA-F]{40}$/.test(a) ? a : ''; };
+  const lqSourced = () => !!(S.settings.liquidUrl || lqAddr());
+
+  // Hyperliquid's info endpoint is public: an address and nothing else, no key. That is the only
+  // reason a page holding no secrets can read this account at all. The field mapping below is
+  // written from their documentation rather than from a response — if the numbers look wrong,
+  // this is the part to check first.
+  const HL_INFO = 'https://api.hyperliquid.xyz/info';
+  async function hlPost(body) {
+    const res = await fetch(HL_INFO, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Hyperliquid rejected ${body.type} (HTTP ${res.status})`);
+    try { return JSON.parse(text); } catch { throw new Error(`Hyperliquid returned non-JSON for ${body.type}`); }
+  }
+  async function fetchHyperliquid(user, dex) {
+    const withDex = o => (dex ? { ...o, dex } : o);
+    const [st, fills] = await Promise.all([
+      hlPost(withDex({ type: 'clearinghouseState', user })),
+      hlPost(withDex({ type: 'userFills', user })),
+    ]);
+    const ms = (st && st.marginSummary) || {};
+    const account = { equity: ms.accountValue ?? null, account_value: ms.accountValue ?? null,
+      margin_used: ms.totalMarginUsed ?? null,
+      available_balance: st && st.withdrawable != null ? st.withdrawable : null, username: null };
+    // szi is signed — negative is short — and the dashboard wants a side and an unsigned size
+    const positions = ((st && st.assetPositions) || []).map(a => {
+      const q = (a && a.position) || {}, szi = Number(q.szi);
+      if (!isFinite(szi) || szi === 0) return null;
+      return { symbol: dex ? `${dex}:${q.coin}` : String(q.coin || ''), displayName: q.coin,
+        side: szi < 0 ? 'short' : 'long', size: String(Math.abs(szi)),
+        entryPx: q.entryPx ?? null, markPx: null,
+        leverage: q.leverage && q.leverage.value != null ? String(q.leverage.value) : null,
+        leverageType: (q.leverage && q.leverage.type) || null,
+        unrealizedPnl: q.unrealizedPnl ?? null, liquidationPx: q.liquidationPx ?? null,
+        marginUsed: q.marginUsed ?? null, returnOnEquity: q.returnOnEquity ?? null };
+    }).filter(Boolean);
+    // `dir` already reads "Open Long" / "Close Long", and closedPnl is only on the closing side —
+    // which is exactly the half that is a trade
+    const rows = (Array.isArray(fills) ? fills : []).map(f => ({
+      time: new Date(Number(f.time)).toISOString(), timeMs: Number(f.time), type: 'Trade',
+      asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
+      size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
+      ...(f.closedPnl == null || f.closedPnl === '' ? {} : { closedPnl: String(f.closedPnl) }),
+      txHash: f.hash || f.tid || '',
+    }));
+    return { account, positions, rows };
+  }
   async function syncLiquid(silent) {
     const cfg = S.settings;
-    if (!cfg.liquidUrl) { if (!silent) { toast('No Liquid sync URL set. Add one in Settings, or paste instead.'); openSettings(); } return; }
+    if (!lqSourced()) { if (!silent) { toast('No Liquid source set. Add your wallet address in Settings, or paste instead.'); openSettings(); } return; }
     if (S.lqBusy) return;
     S.lqBusy = true; S.lqError = null;
     if (S.venue === 'liquid' && S.section === 'open') renderLiquidOpen();
     try {
-      const res = await fetch(cfg.liquidUrl, { headers: cfg.liquidToken ? { Authorization: `Bearer ${cfg.liquidToken}` } : {} });
-      const text = await res.text();
-      if (!res.ok) {
-        let why = `HTTP ${res.status}`;
-        try { why = JSON.parse(text).error || why; } catch { /* not JSON, keep the status */ }
-        throw new Error(why);
+      let parsed;
+      if (cfg.liquidUrl) {
+        const res = await fetch(cfg.liquidUrl, { headers: cfg.liquidToken ? { Authorization: `Bearer ${cfg.liquidToken}` } : {} });
+        const text = await res.text();
+        if (!res.ok) {
+          let why = `HTTP ${res.status}`;
+          try { why = JSON.parse(text).error || why; } catch { /* not JSON, keep the status */ }
+          throw new Error(why);
+        }
+        parsed = readLiquid(text);
+      } else {
+        parsed = await fetchHyperliquid(lqAddr(), String(cfg.liquidDex || '').trim());
       }
-      const added = applyLiquid(readLiquid(text));
+      const added = applyLiquid(parsed);
       lqFails = 0;
       persist();
       if (S.venue === 'liquid') { killCharts(); renderAll(); }
@@ -5778,7 +5838,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function scheduleLiquid() {
     clearTimeout(lqTimer);
-    if (RO || S.venue !== 'liquid' || !S.settings.liquidUrl || S.settings.liquidAuto === false) return;
+    if (RO || S.venue !== 'liquid' || !lqSourced() || S.settings.liquidAuto === false) return;
     // nothing here is armed to act, so a hidden tab has no reason to keep asking
     if (document.hidden) return;
     const base = Math.max(5, parseInt(S.settings.liquidSecs) || 15) * 1000;
@@ -5786,7 +5846,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   function startLiquid() {
     clearTimeout(lqTimer);
-    if (RO || S.venue !== 'liquid' || !S.settings.liquidUrl || S.settings.liquidAuto === false) return;
+    if (RO || S.venue !== 'liquid' || !lqSourced() || S.settings.liquidAuto === false) return;
     syncLiquid(true);
   }
 
@@ -5862,12 +5922,12 @@ if (typeof module !== 'undefined') module.exports = AN;
     const net = ps.reduce((a, p) => a + (p.pnl || 0), 0);
     const stamp = S.lq && S.lq.fetched ? new Date(S.lq.fetched) : null;
     const cfg = S.settings;
-    const auto = !!cfg.liquidUrl && cfg.liquidAuto !== false;
+    const auto = lqSourced() && cfg.liquidAuto !== false;
     const head = `<span class="live ${S.lqError ? 'bad' : ''}">${S.lqError ? 'Sync error'
       : S.lqBusy ? 'Syncing…'
       : auto ? `<i></i>Live · every ${Math.max(5, parseInt(cfg.liquidSecs) || 15)}s`
-      : cfg.liquidUrl ? 'Auto-refresh off' : 'Pasted by hand'}</span>`;
-    const tools = `<div class="tbl-tools">${cfg.liquidUrl ? '<button class="btn sm edit" data-lqsync>Sync now</button>' : ''}<button class="btn ghost sm edit" data-lqimport>Paste</button>${head}</div>`;
+      : lqSourced() ? 'Auto-refresh off' : 'Pasted by hand'}</span>`;
+    const tools = `<div class="tbl-tools">${lqSourced() ? '<button class="btn sm edit" data-lqsync>Sync now</button>' : ''}<button class="btn ghost sm edit" data-lqimport>Paste</button>${head}</div>`;
     const wire = () => {
       const i = el.querySelector('[data-lqimport]'); if (i) i.addEventListener('click', liquidImport);
       const y = el.querySelector('[data-lqsync]'); if (y) y.addEventListener('click', () => syncLiquid(false));
@@ -5875,7 +5935,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const errBox = S.lqError ? `<div class="notice" style="margin-bottom:12px"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>${esc(S.lqError)}</div></div>` : '';
     if (!ps.length) {
       el.innerHTML = `<div class="card"><div class="card-head"><div class="card-title">Open positions<small>From Liquid</small></div>${tools}</div>
-        <div class="card-body">${errBox}<div class="dim" style="font-size:12px">Nothing here yet. ${cfg.liquidUrl ? 'Waiting on the first sync.' : 'Paste the portfolio blob, or set a Liquid sync URL in Settings.'}</div></div></div>`;
+        <div class="card-body">${errBox}<div class="dim" style="font-size:12px">Nothing here yet. ${lqSourced() ? 'Waiting on the first sync.' : 'Paste the portfolio blob, or set your wallet address in Settings.'}</div></div></div>`;
       wire();
       return;
     }
@@ -6120,7 +6180,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     if (t.startsWith('{') || t.startsWith('[')) {
       try { const obj = JSON.parse(t); const trades = Array.isArray(obj) ? obj : obj.trades; if (!Array.isArray(trades)) throw 0;
-        if (obj.settings) { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
+        if (obj.settings) { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, liquidAddress, ...rest } = obj.settings; S.settings = { ...S.settings, ...rest }; } if (obj.theme) { S.theme = obj.theme; applyTheme(); }
         const norm = trades.map(x => ({ ...x, kind: x.kind || 'trade', id: x.id || C.tradeKey(x) }));
         // backups may hold several accounts: restore as a whole
         S.pending = null; S.trades = norm; S.selectedDay = null; if (obj.activity) S.activity = obj.activity; applyActivity(); persist(); closeModals(); renderAll(); toast(`Restored ${plural(norm.filter(x => x.kind === 'trade').length, 'trade')} from backup. Previous data replaced.`); return;
@@ -6179,6 +6239,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     $('#s-profit-color').oninput = onPick; $('#s-loss-color').oninput = onPick; $('#s-riskcap').value = s.riskCapPct === 0 || s.riskCapPct ? s.riskCapPct : 50;
     $('#s-syncurl').value = s.syncUrl || ''; $('#s-synctoken').value = s.syncToken || ''; $('#s-syncdays').value = s.syncDays || 180;
     $('#s-lqurl').value = s.liquidUrl || ''; $('#s-lqtoken').value = s.liquidToken || ''; $('#s-lqsecs').value = s.liquidSecs || 15;
+    $('#s-lqaddr').value = s.liquidAddress || ''; $('#s-lqdex').value = s.liquidDex == null ? 'xyz' : s.liquidDex;
     $('#s-autosync').classList.toggle('on', s.autoSync !== false);
     $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || ''; $('#s-ordertoken').value = s.orderToken || '';
     const ccys = fxCurrencies(), acctC = accountCcy() || 'your currency', seen = igRatesSeen();
@@ -6205,6 +6266,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     applyColors(); s.riskCapPct = $('#s-riskcap').value.trim() === '' ? 0 : parseFloat($('#s-riskcap').value) || 0;
     s.syncUrl = $('#s-syncurl').value.trim(); s.syncToken = $('#s-synctoken').value.trim(); s.syncDays = parseInt($('#s-syncdays').value) || 180;
     s.liquidUrl = $('#s-lqurl').value.trim(); s.liquidToken = $('#s-lqtoken').value.trim();
+    s.liquidAddress = $('#s-lqaddr').value.trim(); s.liquidDex = $('#s-lqdex').value.trim();
     s.liquidSecs = Math.max(5, parseInt($('#s-lqsecs').value) || 15);
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();
@@ -6372,7 +6434,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   // Never let sync credentials leave the browser inside a shared file. The token grants access
   // to the worker, and therefore to the IG account behind it.
-  const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, ...rest } = S.settings || {}; return rest; };
+  const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, liquidAddress, ...rest } = S.settings || {}; return rest; };
 
   function exportSnapshot() {
     const payload = { exported: new Date().toISOString(), trades: S.trades, settings: safeSettings(), theme: S.theme, filters: S.f, section: S.section, activity: S.activity, label: `${rangeLabel(D.tr)}` };

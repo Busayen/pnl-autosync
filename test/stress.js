@@ -253,6 +253,7 @@ async function exportsAndSecrets(browser, tmp) {
     s.settings.syncToken = 'CANARY-TOKEN-DO-NOT-SHARE';
     s.settings.liquidUrl = 'https://canary-liquid.example.workers.dev/liquid';
     s.settings.liquidToken = 'CANARY-LIQUID-DO-NOT-SHARE';
+    s.settings.liquidAddress = '0xCANARYADDRE550000000000000000000000000dd';
     localStorage.setItem('ledger:v4', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'load' });
@@ -268,6 +269,8 @@ async function exportsAndSecrets(browser, tmp) {
     check('snapshot carries no worker URL', !txt.includes('canary.example.workers.dev'));
     check('snapshot carries no Liquid token', !txt.includes('CANARY-LIQUID-DO-NOT-SHARE'));
     check('snapshot carries no Liquid URL', !txt.includes('canary-liquid.example.workers.dev'));
+    // public on-chain data, but it names the person holding the page — not for a shared export
+    check('snapshot carries no wallet address', !txt.includes('0xCANARYADDRE55'));
     // and it must still open as a working read-only page
     fs.copyFileSync(snap, path.join(path.dirname(FILE), '__snap_test.html'));
     const { ctx: c2, page: p2, logs: l2 } = await newPage(browser, undefined, `http://localhost:${PORT}/__snap_test.html`);

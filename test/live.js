@@ -1475,6 +1475,87 @@ async function liquidSync(browser) {
   await page.context().close();
 }
 
+// With a wallet address and no proxy, the page reads Hyperliquid's public info endpoint itself.
+// Its responses are intercepted here with the shapes their documentation describes, which is the
+// only way to check the mapping without reaching the real thing.
+const HL_STATE = {
+  marginSummary: { accountValue: '82.62', totalMarginUsed: '81.94' },
+  withdrawable: '0.68',
+  assetPositions: [
+    { type: 'oneWay', position: { coin: 'CL', szi: '14.183', entryPx: '94.479', unrealizedPnl: '14.2',
+      returnOnEquity: '0.212', leverage: { type: 'isolated', value: 20 }, liquidationPx: '92.0035', marginUsed: '81.94' } },
+    // signed size: negative is a short, and the dashboard wants a side and an unsigned number
+    { type: 'oneWay', position: { coin: 'ETH', szi: '-2.5', entryPx: '3000', unrealizedPnl: '-12',
+      leverage: { type: 'cross', value: 5 }, liquidationPx: '3400', marginUsed: '1500' } },
+    { type: 'oneWay', position: { coin: 'BTC', szi: '0', entryPx: '0' } },
+  ],
+};
+const HL_FILLS = [
+  { coin: 'CL', px: '94.67', sz: '10.828', side: 'A', time: 1789005299646, dir: 'Close Long',
+    closedPnl: '-4.699352', fee: '0.60111', hash: '0xbbb' },
+  { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long', fee: '0.586', hash: '0xccc' },
+];
+
+async function hyperliquidDirect(browser) {
+  state = { orders: [], positions: [] };
+  const { page, errs } = await openPage(browser);
+  const seen = [];
+  await page.route('https://api.hyperliquid.xyz/info', async route => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    seen.push(body);
+    if (state.hlDown) return route.fulfill({ status: 500, body: 'upstream down' });
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify(body.type === 'userFills' ? HL_FILLS : HL_STATE) });
+  });
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    // a stand-in: the repo is public, and a real address here would tie it to whoever owns it
+    s.settings.liquidAddress = '0x1111111111111111111111111111111111111111';
+    s.settings.liquidDex = 'xyz'; s.settings.liquidSecs = 5; s.settings.liquidUrl = '';
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(1600);
+
+  check('both info calls are made', seen.length >= 2, JSON.stringify(seen.map(b => b.type)));
+  check('each carries the wallet address',
+    seen.every(b => b.user === '0x1111111111111111111111111111111111111111'), JSON.stringify(seen[0]));
+  check('and the builder prefix, without which the answer is empty',
+    seen.every(b => b.dex === 'xyz'), JSON.stringify(seen[0]));
+
+  const lq = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    return { pos: s.lq.positions || [], trades: s.trades.filter(t => t.kind === 'trade'),
+             costs: s.trades.filter(t => t.kind === 'cost').length }; });
+  check('a zero-size position is dropped', lq.pos.length === 2, JSON.stringify(lq.pos.map(p => p.name)));
+  const cl = lq.pos.find(p => p.name === 'CL'), eth = lq.pos.find(p => p.name === 'ETH');
+  check('a positive size reads long', !!cl && cl.long && cl.size === 14.183, JSON.stringify(cl));
+  check('a negative size reads short, with the sign taken off',
+    !!eth && !eth.long && eth.size === 2.5, JSON.stringify(eth));
+  check('leverage comes through', !!cl && cl.leverage === 20, JSON.stringify(cl && cl.leverage));
+  check('so does the liquidation price', !!cl && cl.liq === 92.0035);
+  check('the closing fill becomes a trade', lq.trades.length === 1, JSON.stringify(lq.trades));
+  check('the opening fill becomes a fee, not a trade', lq.costs === 1);
+  check('and the entry is recovered from the realised P&L',
+    Math.abs(lq.trades[0].openLevel - 95.104) < 0.001, String(lq.trades[0].openLevel));
+
+  await page.evaluate(() => document.querySelector('[data-section="open"]').click());
+  await page.waitForTimeout(400);
+  check('the card reports it live',
+    /Live/.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+
+  // a browser refused by CORS, or an upstream that falls over, must say so rather than look fine
+  state.hlDown = true;
+  await page.waitForTimeout(8000);
+  check('an upstream failure is reported',
+    /error/i.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
+    await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+  check('and what it already read is kept',
+    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 2);
+  check('no page errors reading Hyperliquid', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1493,6 +1574,7 @@ async function liquidSync(browser) {
       ['placing orders', placingOrders], ['breakeven stop', breakevenStop],
       ['averaging ladder', averagingLadder], ['market search', marketSearch],
       ['two positions on one market', multiPosition], ['liquid autosync', liquidSync],
+      ['hyperliquid direct', hyperliquidDirect],
       ['order ticket chart', ticketChart]]) {
       process.stdout.write(`  ${label}… `);
       const before = results.length;

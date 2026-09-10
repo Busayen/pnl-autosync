@@ -134,7 +134,22 @@ those live on Liquid.
 
 ### Autosync
 
-Set a **Liquid sync URL** in Settings and the pasting stops. Anything that answers with those same
+Set a **Liquid wallet address** in Settings and the pasting stops. Hyperliquid's info endpoint is
+public — it takes an address and nothing else, no key — which is the only reason a page holding no
+secrets can read the account at all. No worker route is needed for this.
+
+Whether a browser is *allowed* to call it depends on Hyperliquid's CORS headers. If it is refused,
+the sync says so on the card rather than looking fine, and a proxy solves it: put a **Liquid sync
+URL** in Settings instead and it takes precedence over the address.
+
+The **builder prefix** matters. Positions like `xyz:CL-PERP` are builder-deployed, so the `dex`
+field must be sent; without it Hyperliquid answers for its main perp dex and returns nothing. If
+positions come back empty while Liquid shows one, that is the field to suspect.
+
+The address is public on-chain data, but it names whoever holds the page, so it is stripped from
+snapshots and backups along with the tokens.
+
+A sync URL works the same way and accepts anything answering with Liquid's shapes. Anything that answers with those same
 shapes will do — a worker route, a proxy, anything. The page holds no Liquid credentials of its
 own; the URL is the whole contract, and an optional token is sent as a bearer if your endpoint
 wants one.
