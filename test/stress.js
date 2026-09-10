@@ -130,7 +130,8 @@ async function venues(browser) {
   const n1 = await paste(LQ_PORTFOLIO);
   check('pasting the portfolio blob reads its positions', /1 open position/.test(n1), n1);
   const n2 = await paste(LQ_HISTORY);
-  check('pasting the history blob reads its fills', /2 closed trades/.test(n2), n2);
+  // both closes carry the same txHash: one order, matched in one block, reported as two fills
+  check('pasting the history blob reads its fills', /1 closed trade\b/.test(n2), n2);
   check('and counts the opening fill as a fee, not a trade', /1 fee/.test(n2), n2);
 
   const book = await page.evaluate(() => {
@@ -139,27 +140,33 @@ async function venues(browser) {
              positions: (s.lq.positions || []).length, igKept: (s.books.ig && s.books.ig.trades || []).length };
   });
   check('the position is stored', book.positions === 1);
-  check('closes become trades and the opening fee a cost', book.trades.length === 2 && book.costs === 1,
-    JSON.stringify({ t: book.trades.length, c: book.costs }));
-  // closedPnl is exact, so the entry behind it is recoverable: both closes came off 95.104
+  check('the two fills of one order become one trade, and the opening fee a cost',
+    book.trades.length === 1 && book.costs === 1, JSON.stringify({ t: book.trades.length, c: book.costs }));
+  check('and it says it took two fills', book.trades[0].fills === 2, JSON.stringify(book.trades[0].fills));
+  check('the size is both legs', book.trades[0].size === '15.983', book.trades[0].size);
+  // 10.828 at 94.67 and 5.155 at 94.671
+  check('the close is what the order got, size-weighted',
+    Math.abs(book.trades[0].closeLevel - 94.6703225302) < 1e-9, String(book.trades[0].closeLevel));
+  // closedPnl is exact, so the entry behind it is recoverable — and folding on the totals returns
+  // the same 95.104 that either leg recovers on its own, which is the test that the fold is sound
   check('the entry price is recovered from the realised P&L, not guessed',
-    book.trades.every(t => Math.abs(t.openLevel - 95.104) < 0.001), JSON.stringify(book.trades.map(t => t.openLevel)));
-  check('P&L is net of the closing fee',
-    Math.abs(book.trades.find(t => t.closeLevel === 94.67).pnl - (-5.30)) < 0.01,
-    JSON.stringify(book.trades.map(t => t.pnl)));
+    Math.abs(book.trades[0].openLevel - 95.104) < 1e-9, String(book.trades[0].openLevel));
+  check('P&L is both legs, net of both closing fees',
+    Math.abs(book.trades[0].pnl - (-7.818756)) < 1e-6, String(book.trades[0].pnl));
   check('the IG book is untouched by any of it', book.igKept === igCount, `${book.igKept} vs ${igCount}`);
 
   const n3 = await paste(LQ_HISTORY);
   check('pasting the same history again finds nothing new', /nothing new|0 closed/i.test(n3), n3);
   const after = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length);
-  check('so nothing is double counted', after === 3, `${after} rows`);
+  check('so nothing is double counted', after === 2, `${after} rows`);
 
   // the whole analytics stack should be running off the Liquid book now
   await page.evaluate(() => document.querySelector('[data-section="overview"]').click());
   await page.waitForTimeout(500);
   check('Liquid gets its own calendar', (await page.evaluate(() => document.querySelectorAll('#cal .day.has').length)) >= 1);
-  // −5.30 and −2.52 from the two closes, and −0.20 for the opening fill's fee: the cost record
-  // has to land in the total too, or fees would quietly vanish from the calendar
+  // −7.82 for the order the two closes make up, and −0.20 for the opening fill's fee: the cost
+  // record has to land in the total too, or fees would quietly vanish from the calendar. Folding
+  // fills changes how the rows are grouped, never what they sum to.
   check('and its own P&L, not IG\'s — fees included',
     /8\.02/.test(await page.evaluate(() => document.querySelector('#cal-sum').innerText)),
     await page.evaluate(() => document.querySelector('#cal-sum').innerText.replace(/\s+/g, ' ')));
@@ -178,7 +185,7 @@ async function venues(browser) {
   await page.selectOption('#venue', 'liquid');
   await page.waitForTimeout(600);
   check('and so is the Liquid book',
-    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length)) === 3);
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length)) === 2);
   check('no console errors switching books', logs.length === 0, logs.slice(0, 3).join(' | '));
   await ctx.close();
 }

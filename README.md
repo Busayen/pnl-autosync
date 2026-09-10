@@ -129,6 +129,18 @@ long, and the mirror for a short. Two closes off the same entry both resolve to 
 which is how you know it is right. Each closed trade is recorded net of its closing fee; an opening
 fill has no result yet but its fee is already paid, so that lands on its own day as a cost.
 
+**One order is one trade, however many fills it took.** A market close eats several levels of the
+book and Hyperliquid reports each level separately — three rows for one exit is ordinary. Fills
+matched in the same block carry that block's hash, so they are folded back into the order they came
+from: sizes summed, the close size-weighted to the price the order actually got, and the entry
+recovered from the totals. Because every fill of an order closes against the same average entry,
+that arithmetic is exact — folding the two real fills below returns 95.104, the same entry either
+one recovers alone. A folded row is marked with how many fills it took.
+
+This matters beyond tidiness. Win rate, average win and loss, expectancy and the R distribution are
+all per trade. Left unfolded, one exit counts three times, and a leg where the price never moved
+counts as a loss the size of its fee — which is how a profitable day reads as a losing one.
+
 Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
 those live on Liquid.
 

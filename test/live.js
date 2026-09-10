@@ -1829,6 +1829,128 @@ async function stopsAcrossVenues(browser) {
   await page.context().close();
 }
 
+// A market close eats several levels of the book and the venue reports each one. Folding them is
+// what makes the row a trade rather than a book level — and what stops a fee-only leg counting
+// against a win rate. Sizes and prices here are real shapes: three legs of one CL exit.
+const LQ_FILL = o => ({ time: '2026-09-10T10:34:12.400Z', asset: 'xyz:CL', side: 'sell',
+  direction: 'Close Long', size: '1', price: '94.67', fee: '0', txHash: '0xblock1', ...o });
+
+async function liquidFillFolding(browser) {
+  state = { orders: [], positions: [], lqRows: [
+    // one order, three fills, one block
+    // every leg closes against the same entry, 94.30, which is how a venue reports them
+    LQ_FILL({ size: '0.648', price: '94.60', fee: '0.036', closedPnl: '0.1944', txHash: '0xb1' }),
+    LQ_FILL({ size: '1.051', price: '94.65', fee: '0.058', closedPnl: '0.36785', txHash: '0xb1' }),
+    LQ_FILL({ size: '10',    price: '94.70', fee: '0.555', closedPnl: '4.0', txHash: '0xb1' }),
+    // a different block on the same market and side: a separate decision, kept separate
+    LQ_FILL({ time: '2026-09-10T10:13:02.100Z', size: '4.404', price: '94.20', fee: '0.244',
+              closedPnl: '0.024', txHash: '0xb2' }),
+    // the opening side of an order: two fee legs, no P&L, folded the same way
+    LQ_FILL({ time: '2026-09-10T09:42:00.000Z', direction: 'Open Long', size: '3', price: '94.10',
+              fee: '0.165', closedPnl: '', txHash: '0xb3' }),
+    LQ_FILL({ time: '2026-09-10T09:42:00.000Z', direction: 'Open Long', size: '3.888', price: '94.12',
+              fee: '0.214', closedPnl: '', txHash: '0xb3' }),
+  ] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const rows = () => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+
+  const all = await rows();
+  check('three fills of one order become one trade, not three',
+    all.filter(t => t.kind === 'trade').length === 2, JSON.stringify(all.map(t => `${t.kind}:${t.size}`)));
+  const big = all.find(t => t.kind === 'trade' && t.fills === 3);
+  check('and it says how many levels it took', !!big, JSON.stringify(all.map(t => t.fills)));
+  check('the size is the sum of the legs, without the float noise of summing them',
+    !!big && big.size === '11.699', big && big.size);
+  // 0.648*94.60 + 1.051*94.65 + 10*94.70 = 1107.77795 over 11.699
+  check('the close is the size-weighted price the order actually got',
+    !!big && Math.abs(big.closeLevel - 94.68996922813915) < 1e-9, big && String(big.closeLevel));
+  // the whole point of folding on the totals: the entry comes back as the one the position held,
+  // not an average of three averages
+  check('and the entry recovers as the entry the position actually had',
+    !!big && Math.abs(big.openLevel - 94.30) < 1e-9, big && String(big.openLevel));
+  check('the P&L is the legs summed, net of every leg\'s fee',
+    !!big && Math.abs(big.pnl - 3.91325) < 1e-6, big && String(big.pnl));
+
+  const other = all.find(t => t.kind === 'trade' && t.fills == null);
+  check('a different block on the same market and side stays its own trade',
+    !!other && other.size === '4.404', other && other.size);
+  check('and a fee-only close keeps reading as the fee it is',
+    !!other && Math.abs(other.pnl - (0.024 - 0.244)) < 1e-6, other && String(other.pnl));
+
+  const cost = all.find(t => t.kind === 'cost');
+  check('the opening fills fold into one fee row', !!cost && cost.fills === 2, JSON.stringify(cost));
+  check('with both legs charged', !!cost && Math.abs(cost.pnl + 0.379) < 1e-6, cost && String(cost.pnl));
+
+  // the same window comes back on every poll and must not pile up or drift
+  const n = all.length;
+  await page.waitForTimeout(7000);
+  check('re-reading the same fills changes nothing', (await rows()).length === n,
+    `${n} -> ${(await rows()).length}`);
+
+  // a resting order that fills across two polls grows the row it already filed
+  state.lqRows.push(LQ_FILL({ size: '2', price: '94.80', fee: '0.111', closedPnl: '1.0', txHash: '0xb1' }));
+  await page.waitForTimeout(7000);
+  const grown = (await rows()).find(t => t.reference === (big || {}).reference);
+  check('a block that fills further grows its trade instead of adding a second one',
+    (await rows()).length === n && !!grown && grown.fills === 4, JSON.stringify(grown && grown.size));
+  check('and the P&L grows with it', !!grown && Math.abs(grown.pnl - 4.80225) < 1e-6,
+    grown && String(grown.pnl));
+  check('while the entry it closed against stays put',
+    !!grown && Math.abs(grown.openLevel - 94.30) < 1e-9, grown && String(grown.openLevel));
+
+  check('no page errors folding fills', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Rows saved one-per-fill before folding existed have to become the same rows a fresh sync would
+// write, or the next sync files a second copy of every order alongside the first.
+async function liquidFillMigration(browser) {
+  state = { orders: [], positions: [], lqRows: [
+    LQ_FILL({ size: '0.648', price: '94.60', fee: '0.036', closedPnl: '0.236', txHash: '0xb1' }),
+    LQ_FILL({ size: '1.051', price: '94.65', fee: '0.058', closedPnl: '0.388', txHash: '0xb1' }),
+  ] };
+  const { page, errs } = await openPage(browser);
+  // written the way the previous build wrote them: one row per fill, LQ-<hash>-<side>-<size>-<price>
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    s.venue = 'liquid';
+    s.books = { ig: { trades: s.trades }, liquid: { trades: [
+      { kind: 'trade', date: '2026-09-10', time: '10:34', instrument: 'xyz:CL', direction: 'BUY',
+        size: '0.648', openLevel: 94.2915, closeLevel: 94.6, currency: 'USD', pnl: 0.2,
+        reference: 'LQ-0xb1-sell-0.648-94.6', openTs: '', closeTs: '2026-09-10T10:34:12.400Z',
+        account: 'Liquid', id: 'ref:LQ-0xb1-sell-0.648-94.6' },
+      { kind: 'trade', date: '2026-09-10', time: '10:34', instrument: 'xyz:CL', direction: 'BUY',
+        size: '1.051', openLevel: 94.2915, closeLevel: 94.65, currency: 'USD', pnl: 0.33,
+        reference: 'LQ-0xb1-sell-1.051-94.65', openTs: '', closeTs: '2026-09-10T10:34:12.400Z',
+        account: 'Liquid', id: 'ref:LQ-0xb1-sell-1.051-94.65' },
+    ] } };
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1500);
+  const rows = () => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+
+  const after = await rows();
+  check('rows saved one per fill are folded on load', after.length === 1, JSON.stringify(after.map(t => t.size)));
+  check('into the size they always summed to', after[0].size === '1.699', after[0].size);
+  check('carrying the P&L they always summed to', Math.abs(after[0].pnl - 0.53) < 1e-9, String(after[0].pnl));
+  check('and the entry both legs shared', Math.abs(after[0].openLevel - 94.2915) < 1e-6, String(after[0].openLevel));
+
+  // the point of matching the reference: the very next sync must recognise its own row
+  await page.waitForTimeout(7000);
+  const settled = await rows();
+  check('and the next sync recognises it instead of filing a second copy',
+    settled.length === 1, JSON.stringify(settled.map(t => `${t.reference} ${t.size}`)));
+  check('no page errors folding stored fills', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1849,6 +1971,7 @@ async function stopsAcrossVenues(browser) {
       ['two positions on one market', multiPosition], ['liquid autosync', liquidSync],
       ['hyperliquid direct', hyperliquidDirect],
       ['liquid conversion edges', liquidEdges],
+      ['liquid fill folding', liquidFillFolding], ['liquid fill migration', liquidFillMigration],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],
       ['order ticket chart', ticketChart]]) {

@@ -2357,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.5.0';
+  const APP_VERSION = 'v9.6.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3131,7 +3131,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const total = rows.reduce((a, t) => a + t.pnl, 0); const multiAcc = accounts().length > 1;
     const tagCell = t => t.kind !== 'trade' ? '<td></td>' : RO ? `<td class="muted">${esc(t.tag || '')}</td>` : `<td><select class="tagsel" aria-label="Setup for ${esc(t.instrument || 'trade')} on ${t.date}" data-tag="${esc(t.id)}"><option value="">—</option>${tags.map(x => `<option value="${esc(x)}" ${t.tag === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></td>`;
     el.innerHTML = rows.length ? `<div class="tbl-wrap"><table><thead><tr>${th('date', 'Date')}<th>Time</th>${th('instrument', 'Symbol')}${multiAcc ? '<th>Account</th>' : ''}${th('side', 'Side')}${tags.length ? th('tag', 'Setup') : ''}${th('size', 'Size', true)}${th('hold', 'Hold', true)}${D.r && D.r.count ? th('r', 'R', true) : ''}${th('pnl', 'P&L', true)}<th class="act"></th></tr></thead><tbody>
-      ${shown.map(t => `<tr><td class="muted">${fdate(t.date, false)}</td><td class="muted num">${esc(t.time || '—')}</td><td class="sym">${esc(t.instrument || '—')}${t.kind === 'cost' ? '<span class="tag">fee</span>' : t.kind === 'cash' ? '<span class="tag">cash</span>' : ''}${t.reference && t.reference.startsWith('MANUAL-') ? '<span class="tag">manual</span>' : ''}${flagged.has(t.id) ? `<span class="flagx" title="Outlier vs your usual size or result">${I.warn}</span>` : ''}${capOver.has(t.id) ? `<span class="flagx over" title="Risked more than your per-trade cap for that session">${I.warn}</span>` : ''}</td>${multiAcc ? `<td class="muted">${esc(t.account || 'Main')}</td>` : ''}<td>${t.direction ? `<span class="side ${t.direction === 'BUY' ? 'long' : 'short'}">${t.direction === 'BUY' ? 'Long' : 'Short'}</span>` : '<span class="dim">—</span>'}</td>${tags.length ? tagCell(t) : ''}<td class="r num muted">${esc(t.size || '—')}</td><td class="r num muted">${fhold(C.holdMinutes(t))}</td>${D.r && D.r.count ? `<td class="r num ${t.risk > 0 ? cls(t.pnl) : 'dim'}" ${t.risk > 0 ? `title="risked ${money(t.risk)} · stop ${t.stop}${t.riskSource === 'amended' ? ' (adjusted after entry)' : ''}${t.lockedIn ? ' · later trailed past entry' : ''}"` : ''}>${t.risk > 0 ? (t.pnl / t.risk >= 0 ? '+' : '−') + Math.abs(t.pnl / t.risk).toFixed(2) + 'R' : '—'}</td>` : ''}<td class="r num pnl-cell"><span class="pnl-pill ${cls(t.pnl)}">${signed(t.pnl)}</span></td><td class="act r">${RO ? '' : `<button class="del" data-del="${esc(t.id)}" aria-label="Delete">${I.trash}</button>`}</td></tr>`).join('')}
+      ${shown.map(t => `<tr><td class="muted">${fdate(t.date, false)}</td><td class="muted num">${esc(t.time || '—')}</td><td class="sym">${esc(t.instrument || '—')}${t.kind === 'cost' ? '<span class="tag">fee</span>' : t.kind === 'cash' ? '<span class="tag">cash</span>' : ''}${t.reference && t.reference.startsWith('MANUAL-') ? '<span class="tag">manual</span>' : ''}${t.fills > 1 ? `<span class="tag" title="One order, filled across ${t.fills} levels of the book">${t.fills} fills</span>` : ''}${flagged.has(t.id) ? `<span class="flagx" title="Outlier vs your usual size or result">${I.warn}</span>` : ''}${capOver.has(t.id) ? `<span class="flagx over" title="Risked more than your per-trade cap for that session">${I.warn}</span>` : ''}</td>${multiAcc ? `<td class="muted">${esc(t.account || 'Main')}</td>` : ''}<td>${t.direction ? `<span class="side ${t.direction === 'BUY' ? 'long' : 'short'}">${t.direction === 'BUY' ? 'Long' : 'Short'}</span>` : '<span class="dim">—</span>'}</td>${tags.length ? tagCell(t) : ''}<td class="r num muted">${esc(t.size || '—')}</td><td class="r num muted">${fhold(C.holdMinutes(t))}</td>${D.r && D.r.count ? `<td class="r num ${t.risk > 0 ? cls(t.pnl) : 'dim'}" ${t.risk > 0 ? `title="risked ${money(t.risk)} · stop ${t.stop}${t.riskSource === 'amended' ? ' (adjusted after entry)' : ''}${t.lockedIn ? ' · later trailed past entry' : ''}"` : ''}>${t.risk > 0 ? (t.pnl / t.risk >= 0 ? '+' : '−') + Math.abs(t.pnl / t.risk).toFixed(2) + 'R' : '—'}</td>` : ''}<td class="r num pnl-cell"><span class="pnl-pill ${cls(t.pnl)}">${signed(t.pnl)}</span></td><td class="act r">${RO ? '' : `<button class="del" data-del="${esc(t.id)}" aria-label="Delete">${I.trash}</button>`}</td></tr>`).join('')}
       </tbody></table></div>
       <div class="tbl-foot"><span>${shown.length < rows.length ? `Showing ${shown.length} of ${rows.length}` : plural(rows.length, 'row')} · net <b class="${cls(total)}">${signed(total)}</b></span><span style="display:flex;gap:6px">${rows.length > 40 ? `<button class="btn ghost sm" data-act="toggle-all">${S.showAll ? 'Show fewer' : `Show all ${rows.length}`}</button>` : ''}<button class="btn ghost sm" data-act="export-rows">${I.download}Export these rows</button></span></div>`
       : `<div class="empty">No trades match.</div>`;
@@ -5654,7 +5654,7 @@ if (typeof module !== 'undefined') module.exports = AN;
                            lq: S.lq, f: S.f, cal: S.cal, section: S.section });
   function bookIn(b) {
     b = b || {};
-    S.trades = Array.isArray(b.trades) ? b.trades : [];
+    S.trades = foldStoredFills(Array.isArray(b.trades) ? b.trades : []);
     S.activity = b.activity || null;
     S.activityJson = b.activityJson || null;
     S.lq = b.lq || emptyLq();
@@ -5706,8 +5706,19 @@ if (typeof module !== 'undefined') module.exports = AN;
   // A fill is not a trade. Only the closing half has a result, and Liquid reports that result
   // exactly — so the entry that produced it can be recovered rather than guessed. The opening half
   // is not a result yet, but its fee has already been paid, and that belongs on the day it was.
+  // One order routinely takes several fills: a market close eats three levels of the book and comes
+  // back as three rows. They are not three trades — counting them that way inflates the trade count
+  // and drags a win rate down with legs that are nothing but the fee. Every fill matched in the same
+  // block carries that block's hash, so that is what they are folded on. A trade id would not do:
+  // that is per fill, which is the thing being folded away.
+  const lqBlock = f => String(f.txHash || f.hash || '') || String(f.time || '');
+  const lqKey = (block, asset, side) => `LQ2-${block}-${asset}-${side}`;
+  // A sum of fills carries float noise its parts never had — 0.648 + 1.051 + 10 is 11.699000000000002
+  const lqTrim = n => Number(n.toPrecision(12));
+  const lqCents = n => Math.round(n * 1e6) / 1e6;
+
   function liquidRecords(rows) {
-    const out = [];
+    const groups = new Map();
     for (const f of rows || []) {
       const iso = String(f.time || '');
       const date = iso.slice(0, 10);
@@ -5718,35 +5729,84 @@ if (typeof module !== 'undefined') module.exports = AN;
       const fee = lqNum(f.fee) || 0;
       if (!lqSane(fee)) continue;
       const asset = C.cleanInstrument(String(f.asset || f.coin || '')) || 'UNKNOWN';
-      const time = iso.slice(11, 16);
-      const ref = `LQ-${f.txHash || iso}-${f.side || ''}-${size}-${px}`;
       const gross = f.closedPnl == null || f.closedPnl === '' ? null : lqNum(f.closedPnl);
-      if (gross != null && lqSane(gross)) {
+      const closing = gross != null && lqSane(gross);
+      let long = null;
+      if (closing) {
         // A close with no size cannot have produced that P&L from a price move, so there is no
         // entry to recover and nothing honest to record.
         if (size <= 0) continue;
         const d = String(f.direction || ''), sd = String(f.side || '').toLowerCase();
         // direction is the truth when it is there; otherwise a close that sold was a long
-        const long = /long/i.test(d) ? true : /short/i.test(d) ? false
+        long = /long/i.test(d) ? true : /short/i.test(d) ? false
           : sd === 'sell' || sd === 'a' ? true : sd === 'buy' || sd === 'b' ? false : null;
         if (long == null) continue;
-        // closedPnl = (close − open) × size for a long, and the mirror of that for a short
-        const open = long ? px - gross / size : px + gross / size;
-        if (!lqSane(open)) continue;
-        out.push({ kind: 'trade', date, time, instrument: asset,
-          direction: long ? 'BUY' : 'SELL', size: String(size),
-          openLevel: Number(open.toPrecision(12)), closeLevel: px,
-          // kept to six places, not two: a venue can settle in fractions of a cent, and rounding
-          // every row to money before summing them builds in a drift the totals never lose
-          currency: 'USD', pnl: Math.round((gross - fee) * 1e6) / 1e6,
-          reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
-      } else if (fee !== 0) {
-        out.push({ kind: 'cost', date, time, instrument: asset, direction: '', size: String(size),
-          currency: 'USD', pnl: -Math.round(fee * 1e6) / 1e6,
-          reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
-      }
+      } else if (fee === 0) continue;         // an opening fill that cost nothing books nothing
+
+      const key = lqKey(lqBlock(f), asset, closing ? (long ? 'L' : 'S') : 'fee');
+      let g = groups.get(key);
+      if (!g) g = groups.set(key, { key, kind: closing ? 'trade' : 'cost', asset, long, iso, date,
+                                    size: 0, notional: 0, fee: 0, gross: 0, fills: 0 }).get(key);
+      // the order is stamped when it started, not when the last leg of it printed
+      if (iso < g.iso) { g.iso = iso; g.date = date; }
+      g.size += size; g.notional += px * size; g.fee += fee; g.gross += closing ? gross : 0; g.fills++;
+    }
+
+    const out = [];
+    for (const g of groups.values()) {
+      const base = { date: g.date, time: g.iso.slice(11, 16), instrument: g.asset, currency: 'USD',
+                     size: String(lqTrim(g.size)), reference: g.key,
+                     openTs: '', closeTs: g.iso, account: 'Liquid',
+                     ...(g.fills > 1 ? { fills: g.fills } : {}) };
+      if (g.kind === 'cost') { out.push({ ...base, kind: 'cost', direction: '', pnl: -lqCents(g.fee) }); continue; }
+      if (g.size <= 0) continue;
+      // size-weighted, so the level shown is the one the order actually got
+      const px = g.notional / g.size;
+      // Every fill of an order closes against the same average entry, so summing them keeps the
+      // arithmetic exact: closedPnl = (close − open) × size for a long, mirrored for a short.
+      const open = g.long ? px - g.gross / g.size : px + g.gross / g.size;
+      if (!lqSane(px) || !lqSane(open)) continue;
+      out.push({ ...base, kind: 'trade', direction: g.long ? 'BUY' : 'SELL',
+                 openLevel: lqTrim(open), closeLevel: lqTrim(px),
+                 // kept to six places, not two: a venue can settle in fractions of a cent, and
+                 // rounding every row to money before summing builds in a drift the totals never lose
+                 pnl: lqCents(g.gross - g.fee) });
     }
     return out;
+  }
+
+  // Rows saved before fills were folded are one per fill, referenced LQ-<hash>-<side>-<size>-<price>.
+  // Recovering the block from that reference folds them into exactly the rows a fresh sync now
+  // produces, so the next sync recognises them instead of filing a second copy alongside.
+  function foldStoredFills(trades) {
+    const old = t => t && t.account === 'Liquid' && typeof t.reference === 'string'
+      && t.reference.startsWith('LQ-');
+    if (!Array.isArray(trades) || !trades.some(old)) return trades;
+    const keep = [], groups = new Map();
+    for (const t of trades) {
+      if (!old(t)) { keep.push(t); continue; }
+      const m = /^LQ-(0x[0-9a-fA-F]+)-/.exec(t.reference);
+      // no hash in the reference means it was stamped with the fill time, which is the same
+      // fallback a fresh sync uses
+      const block = m ? m[1] : String(t.closeTs || t.reference);
+      const key = lqKey(block, t.instrument, t.kind === 'cost' ? 'fee' : t.direction === 'BUY' ? 'L' : 'S');
+      const g = groups.get(key) || groups.set(key, []).get(key);
+      g.push(t);
+    }
+    for (const [key, rows] of groups) {
+      const size = rows.reduce((a, t) => a + (parseFloat(t.size) || 0), 0);
+      const first = rows.reduce((a, t) => (t.closeTs || '') < (a.closeTs || '') ? t : a, rows[0]);
+      // the stored P&L is already net of that fill's fee, so summing it needs no fee to recover
+      const pnl = lqCents(rows.reduce((a, t) => a + (t.pnl || 0), 0));
+      const wavg = k => size > 0
+        ? lqTrim(rows.reduce((a, t) => a + (t[k] || 0) * (parseFloat(t.size) || 0), 0) / size) : null;
+      const merged = { ...first, reference: key, size: String(lqTrim(size)), pnl,
+                       ...(rows.length > 1 ? { fills: rows.length } : {}) };
+      if (first.kind !== 'cost') { merged.openLevel = wavg('openLevel'); merged.closeLevel = wavg('closeLevel'); }
+      merged.id = C.tradeKey(merged);
+      keep.push(merged);
+    }
+    return keep.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   }
 
   const lqPositions = list => (list || []).map(p => ({
@@ -5784,13 +5844,20 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
     let added = 0;
     if (parsed.rows) {
-      const have = new Set(S.trades.map(x => x.reference));
-      const fresh = liquidRecords(parsed.rows).filter(r => !have.has(r.reference));
+      const at = new Map(S.trades.map((t, i) => [t.reference, i]));
+      const fresh = [];
+      // A resting order can fill across two polls, so a block already filed may have grown a leg
+      // since. Skipping it on the reference alone would leave the row short of its own trade.
+      for (const r of liquidRecords(parsed.rows)) {
+        const i = at.get(r.reference);
+        if (i == null) { fresh.push(r); if (r.kind === 'trade') added++; continue; }
+        const was = S.trades[i];
+        if (was.size !== r.size || was.pnl !== r.pnl) S.trades[i] = { ...was, ...r, id: C.tradeKey(r) };
+      }
       if (fresh.length) {
         S.trades = S.trades.concat(fresh.map(t => ({ ...t, id: C.tradeKey(t) })))
           .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
       }
-      added = fresh.filter(t => t.kind === 'trade').length;
     }
     S.lq.fetched = new Date().toISOString();
     return added;
@@ -5850,7 +5917,8 @@ if (typeof module !== 'undefined') module.exports = AN;
         asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
         size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
         ...(f.closedPnl == null || f.closedPnl === '' ? {} : { closedPnl: String(f.closedPnl) }),
-        txHash: f.hash || f.tid || '',
+        // deliberately not f.tid: that is per fill, and fills of one order share only the hash
+        txHash: f.hash || '',
       });
     }
     return { account, positions, rows };
@@ -6705,7 +6773,12 @@ if (typeof module !== 'undefined') module.exports = AN;
   } else {
     const saved = store.load();
     if (saved) { if (Array.isArray(saved.trades)) S.trades = saved.trades.map(t => ({ ...t, kind: t.kind || 'trade', id: t.id || C.tradeKey(t) })); if (saved.theme) S.theme = saved.theme; if (saved.settings) S.settings = { ...S.settings, ...saved.settings }; if (saved.activity) S.activity = saved.activity; if (saved.activityJson) S.activityJson = saved.activityJson; if (saved.section && SECTIONS.some(x => x[0] === saved.section)) S.section = saved.section;
-      if (saved.books && typeof saved.books === 'object') S.books = saved.books;
+      S.trades = foldStoredFills(S.trades);
+      if (saved.books && typeof saved.books === 'object') {
+        S.books = saved.books;
+        for (const k of Object.keys(S.books)) if (S.books[k] && Array.isArray(S.books[k].trades))
+          S.books[k] = { ...S.books[k], trades: foldStoredFills(S.books[k].trades) };
+      }
       if (saved.lq && typeof saved.lq === 'object') S.lq = saved.lq;
       // the active venue is restored last, because loading its book overwrites what came before
       if (saved.venue && VENUES.some(x => x[0] === saved.venue) && saved.venue !== 'ig') {
