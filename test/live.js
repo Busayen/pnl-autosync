@@ -30,11 +30,14 @@ function serve(dir) {
         : json(200, { fetched: new Date().toISOString(), positions: state.positions || [] }); }
     if (p === '/orders') { calls.push({ p });
       return json(200, { fetched: new Date().toISOString(), orders: state.orders || [] }); }
-    if (p === '/sync') { calls.push({ p }); return json(200, { account: 'IG', transactions: [], activity: [] }); }
+    if (p === '/sync') { calls.push({ p });
+      const body = { account: 'IG', transactions: state.syncTx || [], activity: [] };
+      return state.syncDelay ? setTimeout(() => json(200, body), state.syncDelay) : json(200, body); }
     if (p === '/liquid') {
       calls.push({ p, auth: req.headers.authorization || null });
       if (state.lqStatus && state.lqStatus !== 200) return json(state.lqStatus, { error: 'liquid upstream is down' });
-      return json(200, {
+      const send = (c, o) => state.lqDelay ? setTimeout(() => json(c, o), state.lqDelay) : json(c, o);
+      return send(200, {
         account: { equity: '82.62', margin_used: '81.94', available_balance: '0.68', username: 'busayen' },
         positions: [{ symbol: 'xyz:CL-PERP', side: 'long', size: '14.183', entryPx: '94.479',
           markPx: String(state.lqMark || 95.465), leverage: '20', leverageType: 'isolated',
@@ -1494,6 +1497,10 @@ const HL_FILLS = [
   { coin: 'CL', px: '94.67', sz: '10.828', side: 'A', time: 1789005299646, dir: 'Close Long',
     closedPnl: '-4.699352', fee: '0.60111', hash: '0xbbb' },
   { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long', fee: '0.586', hash: '0xccc' },
+  // one unreadable timestamp: new Date(NaN).toISOString() throws, and the throw used to take the
+  // whole response with it — every good fill in it, on every poll from then on
+  { coin: 'SOL', px: '150', sz: '3', side: 'A', time: 'not-a-time', dir: 'Close Long',
+    closedPnl: '9', fee: '0.1', hash: '0xeee' },
 ];
 
 async function hyperliquidDirect(browser) {
@@ -1534,9 +1541,13 @@ async function hyperliquidDirect(browser) {
   check('leverage comes through', !!cl && cl.leverage === 20, JSON.stringify(cl && cl.leverage));
   check('so does the liquidation price', !!cl && cl.liq === 92.0035);
   check('the closing fill becomes a trade', lq.trades.length === 1, JSON.stringify(lq.trades));
+  check('a fill with an unreadable timestamp is skipped on its own',
+    !lq.trades.some(t => t.instrument === 'SOL'), JSON.stringify(lq.trades.map(t => t.instrument)));
   check('the opening fill becomes a fee, not a trade', lq.costs === 1);
   check('and the entry is recovered from the realised P&L',
     Math.abs(lq.trades[0].openLevel - 95.104) < 0.001, String(lq.trades[0].openLevel));
+  check('and the rest of the response survives it',
+    lq.trades[0].instrument === 'CL' && lq.pos.length === 2, JSON.stringify(lq.trades[0].instrument));
 
   await page.evaluate(() => document.querySelector('[data-section="open"]').click());
   await page.waitForTimeout(400);
@@ -1553,6 +1564,268 @@ async function hyperliquidDirect(browser) {
   check('and what it already read is kept',
     (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 2);
   check('no page errors reading Hyperliquid', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Every row below is one that used to come out wrong. A venue's export is not a friendly
+// document: it quotes small-cap coins in exponent notation, pays maker rebates as negative fees,
+// and leaves fields blank. These are the shapes that broke the conversion, kept as a fence.
+const LQ_ROW = o => ({ time: '2026-09-10T01:00:00.000Z', asset: 'X', side: 'sell',
+  direction: 'Close Long', size: '1', price: '100', fee: '0', txHash: '0x0', ...o });
+const EDGE_ROWS = [
+  LQ_ROW({ asset: 'PEPE', size: '1e6', price: '1.5e-7', closedPnl: '2.5e-2', txHash: '0x1' }),
+  LQ_ROW({ asset: 'HUGE', price: '1e308', closedPnl: '1', txHash: '0x2' }),
+  LQ_ROW({ asset: 'ZERO', size: '0', closedPnl: '5', txHash: '0x3' }),
+  LQ_ROW({ asset: 'REB', size: '2', price: '50', fee: '-0.4', closedPnl: '10', txHash: '0x4' }),
+  LQ_ROW({ asset: 'REBO', direction: 'Open Long', size: '2', price: '50', fee: '-0.4', txHash: '0x5' }),
+  LQ_ROW({ asset: 'FREE', direction: 'Open Long', fee: '0', txHash: '0x6' }),
+  LQ_ROW({ asset: 'NOSIDE', direction: '', side: '', closedPnl: '3', txHash: '0x7' }),
+  LQ_ROW({ asset: 'SIDEONLY', direction: '', side: 'buy', size: '2', price: '50', closedPnl: '10', txHash: '0x8' }),
+  LQ_ROW({ asset: 'COMMA', size: '2', price: '1,234.5', closedPnl: '9', txHash: '0x9' }),
+  LQ_ROW({ asset: 'JUNK', price: 'abc', closedPnl: '1', txHash: '0xa' }),
+];
+
+async function liquidEdges(browser) {
+  state = { orders: [], positions: [] };
+  const { page, errs } = await openPage(browser);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(400);
+
+  // the demo set is IG-shaped; loading it here would bury real Liquid history under samples
+  await page.evaluate(() => document.querySelector('[data-act="demo"]').click());
+  await page.waitForTimeout(400);
+  check('the demo set is refused on the Liquid book',
+    !(await page.evaluate(() => !!document.querySelector('#m-review.open'))));
+  check('and nothing of it lands',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades.length)) === 0);
+
+  await page.evaluate(() => document.querySelector('[data-lqimport]').click());
+  await page.waitForTimeout(250);
+  await page.fill('#lq-json', JSON.stringify({ rows: EDGE_ROWS }));
+  await page.waitForTimeout(250);
+  await page.evaluate(() => document.querySelector('[data-lqgo]').click());
+  await page.waitForTimeout(600);
+
+  const all = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+  const of = n => all.filter(t => t.instrument === n);
+  const one = n => of(n)[0] || {};
+
+  // 1e6 once read as 16, and 1.5e-7 as 1.5: the parser stripped the exponent instead of rejecting
+  const pepe = one('PEPE');
+  check('a size in exponent notation is read whole, not stripped to its digits',
+    pepe.size === '1000000', String(pepe.size));
+  check('and so is a sub-cent price', pepe.closeLevel === 1.5e-7, String(pepe.closeLevel));
+  // the entry was rounded to six places, which is zero for a coin quoted at 1.5e-7
+  check('the entry recovered from a sub-cent close survives rounding',
+    Math.abs(pepe.openLevel - 1.25e-7) < 1e-15, String(pepe.openLevel));
+  check('and the P&L is kept finer than money', pepe.pnl === 0.025, String(pepe.pnl));
+
+  check('a price past anything a venue quotes is dropped, not read as 1308', of('HUGE').length === 0,
+    JSON.stringify(of('HUGE')));
+  check('a close with no size is dropped rather than given a fabricated entry',
+    of('ZERO').length === 0, JSON.stringify(of('ZERO')));
+  check('a price that is not a number is dropped', of('JUNK').length === 0, JSON.stringify(of('JUNK')));
+
+  const reb = one('REB');
+  check('a maker rebate on a close adds to the P&L instead of being charged',
+    reb.pnl === 10.4, String(reb.pnl));
+  check('the entry comes back from the realised P&L', reb.openLevel === 45, String(reb.openLevel));
+  const rebo = one('REBO');
+  check('a rebate on an opening fill is booked as a credit', rebo.kind === 'cost' && rebo.pnl === 0.4,
+    JSON.stringify(rebo));
+  check('an opening fill that cost nothing books nothing', of('FREE').length === 0);
+
+  check('a close with neither a direction nor a readable side is dropped, not guessed short',
+    of('NOSIDE').length === 0, JSON.stringify(of('NOSIDE')));
+  const so = one('SIDEONLY');
+  check('a missing direction falls back to the side', so.direction === 'SELL', String(so.direction));
+  check('and the entry is mirrored for that side', so.openLevel === 55, String(so.openLevel));
+
+  const cm = one('COMMA');
+  check('a thousands separator is still read', cm.closeLevel === 1234.5, String(cm.closeLevel));
+  check('with the entry to match', cm.openLevel === 1230, String(cm.openLevel));
+
+  check('no page errors converting hostile rows', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Rebuilding the panel throws the <canvas> away, and with it a drag in progress, the pointer
+// capture and the crosshair. On a market that has not ticked this used to happen on every poll —
+// twice a second's worth of work, and a chart you could not hold on to.
+async function chartUnderPolling(browser) {
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'IX.D.SPTRD.IFE.IP', market: 'US 500',
+    direction: 'BUY', size: 2, level: 5000, bid: 5062, offer: 5063, stopLevel: 4980,
+    limitLevel: 5090, contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser, { width: 1400, height: 900 });
+  await page.evaluate(() => document.querySelector('.symlink')?.click());
+  await page.waitForTimeout(2200);
+  const st = () => page.evaluate(() => window.__chart && window.__chart());
+  const mark = () => page.evaluate(() => { window.__cv = document.querySelector('#c-pos'); return !!window.__cv; });
+  const same = () => page.evaluate(() => window.__cv === document.querySelector('#c-pos') && window.__cv.isConnected);
+  const pnl = () => page.evaluate(() => (document.querySelector('#chartcard .stat-row b') || {}).innerText || '');
+
+  check('the chart is open', !!(await st()));
+  await mark();
+  // the price is unchanged between polls, which is the case that used to rebuild it every time
+  await page.waitForTimeout(7000);
+  check('a flat market leaves the canvas alone across several polls', await same());
+
+  // the numbers around it must still move when the price does
+  const before = await pnl();
+  state.positions[0].bid = 5090; state.positions[0].offer = 5091;
+  await repoll(page);
+  check('but the unrealised P&L still follows the price', (await pnl()) !== before,
+    `${before} -> ${await pnl()}`);
+  check('and it did not need a new canvas to do it', await same());
+
+  // a stop moved by anything other than a price tick still reaches the chart
+  state.positions[0].stopLevel = 5010;
+  await repoll(page);
+  const lv = await page.evaluate(() => { const c = Chart.getChart(document.querySelector('#c-pos'));
+    return (c.options.plugins.levelLines.lines || []).map(l => l.value); });
+  check('a stop that moved on its own is redrawn', lv.some(v => Math.abs(v - 5010) < 0.5), JSON.stringify(lv));
+
+  // a pan that spans a poll: the drag lives on the canvas, so a swap silently drops it
+  const b = await (await page.$('#c-pos')).boundingBox();
+  await page.evaluate(() => document.querySelector('[data-zoom="fit"]')?.click());
+  await page.waitForTimeout(300);
+  await page.mouse.move(b.x + b.width * 0.8, b.y + b.height * 0.5);
+  await page.mouse.down();
+  for (let i = 1; i <= 4; i++) await page.mouse.move(b.x + b.width * 0.8 - i * 25, b.y + b.height * 0.5);
+  const mid = (await st()).x.min;
+  await page.waitForTimeout(2600);                       // a poll lands here
+  for (let i = 5; i <= 10; i++) await page.mouse.move(b.x + b.width * 0.8 - i * 25, b.y + b.height * 0.5);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const after = (await st()).x.min;
+  check('a drag that spans a poll keeps panning', Math.abs(after - mid) > 0.5,
+    `${mid.toFixed(2)} -> ${after.toFixed(2)}`);
+
+  // orders are polled on their own clock and have nothing to do with the chart
+  await mark();
+  await page.waitForTimeout(21000);
+  check('the orders poll does not rebuild the chart either', await same());
+
+  check('no page errors while the chart sits through polls', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// Two books, one page. Every feed here is asynchronous, so a response can land after you have
+// already switched — and both of these writes go straight into whichever book is open at the time
+// and are then persisted. One of them replaces every trade in it.
+// A sync with nothing usable in it throws before it writes, so it proves nothing about what a
+// landing sync does to the open book. This one parses.
+const IG_TX = [{ dateUtc: '2026-09-08T10:00:00', date: '08/09/26', instrumentName: 'Wall Street Cash',
+  transactionType: 'DEAL', size: '+1', openLevel: '40000', closeLevel: '40080',
+  profitAndLoss: '80.00', currency: 'GBP', reference: 'IGREF1', cashTransaction: false }];
+
+async function venueIsolation(browser) {
+  state = { orders: [], positions: [], lqRows: [LQ_CLOSE(94.67, -4.699352, '0xrace')], lqDelay: 2500 };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1200);
+  const book = v => page.evaluate(k => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    const b = s.venue === k ? s : ((s.books || {})[k] || {});
+    const tr = b.trades || [];
+    return { trades: tr.length, fromLiquid: tr.filter(t => t.account === 'Liquid').length,
+             lqPos: ((b.lq || {}).positions || []).length }; }, v);
+
+  const ig0 = await book('ig');
+  check('the IG book starts with the demo set', ig0.trades > 0 && ig0.fromLiquid === 0, JSON.stringify(ig0));
+
+  // switch to Liquid, then straight back before the slow venue answers
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(300);
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(4000);
+  const ig1 = await book('ig');
+  check('a Liquid sync that lands after the switch does not write into the IG book',
+    ig1.fromLiquid === 0 && ig1.lqPos === 0, JSON.stringify(ig1));
+  check('and it leaves the IG trades exactly as they were', ig1.trades === ig0.trades,
+    `${ig0.trades} -> ${ig1.trades}`);
+
+  // let Liquid fill its own book properly
+  state.lqDelay = 0;
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const lq0 = await book('liquid');
+  check('the Liquid book fills on its own tab', lq0.trades === 1 && lq0.lqPos === 1, JSON.stringify(lq0));
+
+  // now the mirror: an IG sync in flight while the venue moves to Liquid. It does not merge —
+  // it replaces every trade in the open book.
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(1500);
+  state.syncDelay = 2500; state.syncTx = IG_TX;
+  calls = [];
+  await page.evaluate(() => document.querySelector('[data-act="sync"]')?.click());
+  await page.waitForTimeout(300);
+  check('the IG sync is genuinely in flight when the venue changes',
+    calls.some(c => c.p === '/sync'), JSON.stringify(calls.map(c => c.p)));
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(4000);
+  const lq1 = await book('liquid');
+  check('an IG sync that lands after the switch does not wipe the Liquid book',
+    lq1.trades === lq0.trades && lq1.fromLiquid === lq0.fromLiquid, JSON.stringify(lq1));
+  check('and none of IG\'s own rows are left in it',
+    !(await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades
+      .some(t => t.reference === 'IGREF1'))));
+
+  // the dropped sync is not simply lost: coming back to IG runs it again
+  state.syncDelay = 0;
+  calls = [];
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(2000);
+  check('and returning to IG re-runs the sync that was dropped',
+    calls.some(c => c.p === '/sync'), JSON.stringify(calls.map(c => c.p)));
+
+  check('no page errors switching books under load', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// A stop armed here is armed against a real IG position. Reading the other book is not a reason
+// to stop watching it, and the dialog does not say it is.
+async function stopsAcrossVenues(browser) {
+  state = { orders: [], positions: [{ dealId: 'D1', epic: 'E', market: 'US 500', direction: 'BUY',
+    size: 2, level: 5000, bid: 5100, offer: 5101, contractSize: 1, currency: 'USD' }] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.closeToken = 'CLOSETOK'; s.settings.liquidUrl = `http://localhost:${p}/liquid`;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1400);
+  await page.evaluate(() => document.querySelector('#subnav [data-section="open"]')?.click());
+  await page.waitForTimeout(1000);
+  await page.evaluate(() => document.querySelector('[data-softstop]')?.click());
+  await page.waitForTimeout(400);
+  await page.fill('#ss-price', '5050');
+  await page.evaluate(() => document.querySelector('[data-arm]')?.click());
+  await page.waitForTimeout(700);
+  check('the stop is armed', (await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    return (s.settings.softStops.D1 || {}).state; })) === 'armed');
+
+  await page.selectOption('#venue', 'liquid');
+  // long enough that any poll already scheduled has come and gone
+  await page.waitForTimeout(9000);
+  calls = [];
+  state.positions[0].bid = 5040; state.positions[0].offer = 5041;
+  await page.waitForTimeout(7000);
+  check('an armed stop is still watched from the other book',
+    calls.filter(c => c.p === '/close').length === 1, `${calls.filter(c => c.p === '/close').length} sends`);
+  check('but the orders feed is not polled there, because nothing reads it',
+    calls.filter(c => c.p === '/orders').length === 0, `${calls.filter(c => c.p === '/orders').length} calls`);
+  check('and the other book is not showing IG positions',
+    !/US 500/.test(await page.evaluate(() => document.querySelector('#open')?.innerText || '')));
+
+  // with nothing armed there is nothing to watch, and IG's request budget is small
+  calls = [];
+  await page.waitForTimeout(7000);
+  check('once it has fired, the other book stops polling IG',
+    calls.filter(c => c.p === '/positions').length === 0, `${calls.filter(c => c.p === '/positions').length} polls`);
+
+  check('no page errors watching a stop from another book', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
 }
 
@@ -1575,10 +1848,17 @@ async function hyperliquidDirect(browser) {
       ['averaging ladder', averagingLadder], ['market search', marketSearch],
       ['two positions on one market', multiPosition], ['liquid autosync', liquidSync],
       ['hyperliquid direct', hyperliquidDirect],
+      ['liquid conversion edges', liquidEdges],
+      ['chart under polling', chartUnderPolling],
+      ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],
       ['order ticket chart', ticketChart]]) {
+      if (process.env.ONLY && !label.includes(process.env.ONLY)) continue;
       process.stdout.write(`  ${label}… `);
       const before = results.length;
       try { await fn(browser); } catch (e) { check(`${label} suite crashed`, false, String(e.message || e).slice(0, 140)); }
+      // A suite that threw never reached its own close, and a page left open keeps polling into
+      // the shared call log — which then reads as a failure in whichever suite runs next.
+      for (const c of browser.contexts()) await c.close().catch(() => {});
       const run = results.slice(before);
       console.log(`${run.filter(x => x.pass).length}/${run.length}`);
     }

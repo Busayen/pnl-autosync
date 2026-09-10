@@ -321,6 +321,9 @@ the machine is asleep, the network is down, or the market gaps straight through 
 background tab keeps watching but browsers throttle it to roughly once a minute, so the fill can be
 well past your level. It sends a market order, so it slips like any other.
 
+Reading the other book is not the same as shutting the tab: an armed stop is still watched from the
+Liquid side, because it was armed against a real position. Nothing else about IG is polled there.
+
 It is a convenience on top of a broker stop, **never a replacement for one**.
 
 ### Fixed, breakeven, or trailing

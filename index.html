@@ -2357,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.4.0';
+  const APP_VERSION = 'v9.5.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -4476,6 +4476,46 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (tv) { tv.innerHTML = ''; tv.dataset.url = ''; }
   }
 
+  // The two parts of the panel that move with the price. They live out here so the light refresh
+  // below and the full render read the same source and cannot drift apart.
+  const chartSubtitle = p => (p.preview
+    ? `Planning ${p.long ? 'a buy' : 'a sell'}${p.size ? ` of ${p.size}` : ''}`
+    : (() => { const sib = chartSiblings();
+        if (sib.length < 2) return `${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}`;
+        const size = Math.round(sib.reduce((t, x) => t + (Number(x.size) || 0), 0) * 100) / 100;
+        const net = sib.every(x => x.pnl != null) ? sib.reduce((t, x) => t + x.pnl, 0) : null;
+        return `${plural(sib.length, 'position')} · ${size} total`
+          + (net == null ? '' : ` · ${net >= 0 ? '+' : ''}${moneyIn(net, sib[0].ccy)}`);
+      })()) + (chartState && chartState.cached ? ' · from cache' : '');
+  const chartStats = p => p.preview ? `
+          <div><span class="k">Entry</span><b class="num">${p.level != null ? p.level : 'market'}</b><span class="k">${p.cur != null ? `last ${p.cur}` : 'no live price for this instrument'}</span></div>
+          <div><span class="k">Stop</span><b class="num ${p.stopLevel != null ? 'loss' : 'dim'}">${p.stopLevel ?? '—'}</b><span class="k">${p.previewRisk != null ? `risking about ${money(p.previewRisk)}` : ''}</span></div>
+          <div><span class="k">Target</span><b class="num ${p.limitLevel != null ? 'profit' : 'dim'}">${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
+        ` : `
+          <div><span class="k">Unrealised</span><b class="${cls(p.pnl)}">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</b><span class="k">${p.cur != null ? `now ${p.cur}` : ''}</span></div>
+          <div><span class="k">R</span><b class="${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</b><span class="k">${p.risk != null ? `risking ${moneyIn(p.risk, p.ccy)}` : (p.locked != null ? 'stop beyond entry' : '')}</span></div>
+          <div><span class="k">Stop / target</span><b class="num">${p.stopLevel ?? '—'} <span class="dim">/</span> ${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
+          <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
+        `;
+
+  // Rebuilding the panel replaces the <canvas>, which takes an in-flight drag, the pointer capture
+  // and the crosshair with it. On a market that has not ticked there is nothing on the canvas to
+  // change anyway — only the numbers around it — so refresh those in place instead.
+  function refreshChartMeta() {
+    const el = chartHost(); if (!el || !chartState) return;
+    const card = el.querySelector('#chartcard');
+    const p = card && chartPos();
+    if (!card || !p) { renderChartPanel(); return; }
+    const sm = card.querySelector('.card-title small');
+    if (sm) sm.innerHTML = chartSubtitle(p);
+    const sr = card.querySelector('.stat-row');
+    if (sr) sr.innerHTML = chartStats(p);
+    // the stop and target can move without a price tick — a trailing stop, or one you just set —
+    // and redrawChart repaints the existing canvas rather than replacing it
+    redrawChart();
+    paintOhlc();
+  }
+
   function renderChartPanel() {
     const el = chartHost(); if (!el) return;
     if (!chartState) { el.innerHTML = ''; return; }
@@ -4484,15 +4524,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const a = chartState.allowance;
     el.innerHTML = `<div class="card chart wide" id="chartcard">
         <div class="card-head">
-          <div class="card-title">${esc(p.market || p.epic)}<small>${p.preview
-            ? `Planning ${p.long ? 'a buy' : 'a sell'}${p.size ? ` of ${p.size}` : ''}`
-            : (() => { const sib = chartSiblings();
-                if (sib.length < 2) return `${p.long ? 'Long' : 'Short'} ${p.size} from ${p.level ?? '—'}`;
-                const size = Math.round(sib.reduce((t, x) => t + (Number(x.size) || 0), 0) * 100) / 100;
-                const net = sib.every(x => x.pnl != null) ? sib.reduce((t, x) => t + x.pnl, 0) : null;
-                return `${plural(sib.length, 'position')} · ${size} total`
-                  + (net == null ? '' : ` · ${net >= 0 ? '+' : ''}${moneyIn(net, sib[0].ccy)}`);
-              })()}${chartState.cached ? ' · from cache' : ''}</small></div>
+          <div class="card-title">${esc(p.market || p.epic)}<small>${chartSubtitle(p)}</small></div>
           <div class="tbl-tools">
             <span class="tabs">${RES_CHOICES.filter(([k]) => RES_QUICK.includes(k)).map(([k, l]) => `<button class="tab ${chartState.res === k ? 'active' : ''}" data-res="${k}">${l}</button>`).join('')}</span>
             <span class="select sm"><select id="res-more" aria-label="Timeframe">${RES_CHOICES.map(([k, l]) => `<option value="${k}" ${chartState.res === k ? 'selected' : ''}>${l}</option>`).join('')}</select></span>
@@ -4508,16 +4540,7 @@ if (typeof module !== 'undefined') module.exports = AN;
             ${p.preview ? '' : '<button class="btn ghost icon sm" data-chartclose aria-label="Close chart"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>'}
           </div>
         </div>
-        ${p.preview ? `<div class="stat-row" style="padding:12px 16px 6px">
-          <div><span class="k">Entry</span><b class="num">${p.level != null ? p.level : 'market'}</b><span class="k">${p.cur != null ? `last ${p.cur}` : 'no live price for this instrument'}</span></div>
-          <div><span class="k">Stop</span><b class="num ${p.stopLevel != null ? 'loss' : 'dim'}">${p.stopLevel ?? '—'}</b><span class="k">${p.previewRisk != null ? `risking about ${money(p.previewRisk)}` : ''}</span></div>
-          <div><span class="k">Target</span><b class="num ${p.limitLevel != null ? 'profit' : 'dim'}">${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
-        </div>` : `<div class="stat-row" style="padding:12px 16px 6px">
-          <div><span class="k">Unrealised</span><b class="${cls(p.pnl)}">${p.pnl == null ? '—' : (p.pnl >= 0 ? '+' : '') + moneyIn(p.pnl, p.ccy)}</b><span class="k">${p.cur != null ? `now ${p.cur}` : ''}</span></div>
-          <div><span class="k">R</span><b class="${p.r == null ? 'dim' : cls(p.r)}">${p.r == null ? '—' : (p.r >= 0 ? '+' : '−') + Math.abs(p.r).toFixed(2) + 'R'}</b><span class="k">${p.risk != null ? `risking ${moneyIn(p.risk, p.ccy)}` : (p.locked != null ? 'stop beyond entry' : '')}</span></div>
-          <div><span class="k">Stop / target</span><b class="num">${p.stopLevel ?? '—'} <span class="dim">/</span> ${p.limitLevel ?? '—'}</b><span class="k">${p.rr ? p.rr.toFixed(2) + ' reward-to-risk' : ''}</span></div>
-          <div><span class="k"> </span><button class="btn ghost sm" data-close="${esc(p.dealId)}">Close position</button><span class="k"> </span></div>
-        </div>`}
+        <div class="stat-row" style="padding:12px 16px 6px">${chartStats(p)}</div>
         <div class="ohlc" id="ohlc">${(() => {
           const h = chartState.hover, rows = chartRows();
           const c = h != null && rows[h] ? rows[h] : rows[rows.length - 1];
@@ -5653,7 +5676,9 @@ if (typeof module !== 'undefined') module.exports = AN;
     renderAll();
     renderVenue();
     clearTimeout(lqTimer);
-    if (v === 'liquid') startLiquid(); else startAuto();
+    // schedulePoll decides for itself whether IG still needs watching: on another book it keeps
+    // going only while a stop or a ladder is armed.
+    if (v === 'ig') startAuto(); else { startLiquid(); schedulePoll(); }
   }
   function renderVenue() {
     const el = $('#venue'); if (!el) return;
@@ -5665,7 +5690,18 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Liquid runs on Hyperliquid. This page is static and holds no credentials for it, so the data
   // arrives the way everything else here does — you paste it, in exactly the shape Liquid's own
   // portfolio and history calls hand back.
-  const lqNum = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; };
+  const lqNum = v => {
+    if (v == null) return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const t = String(v).trim().replace(/[\s,]/g, '');
+    // parsed only if the whole string is a number, exponent and all — never salvaged from one
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(t)) return null;
+    const n = Number(t);
+    return isFinite(n) ? n : null;
+  };
+  // A price or size past this is not a quote, it is a broken feed. Letting one through poisons
+  // every average and every total it touches.
+  const lqSane = n => n != null && isFinite(n) && Math.abs(n) < 1e12;
 
   // A fill is not a trade. Only the closing half has a result, and Liquid reports that result
   // exactly — so the entry that produced it can be recovered rather than guessed. The opening half
@@ -5677,24 +5713,36 @@ if (typeof module !== 'undefined') module.exports = AN;
       const date = iso.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       const size = Math.abs(lqNum(f.size) || 0), px = lqNum(f.price);
-      if (px == null) continue;
-      const fee = Math.abs(lqNum(f.fee) || 0);
+      if (!lqSane(px) || !lqSane(size)) continue;
+      // signed: a negative fee is a maker rebate, and turning it into a cost would understate you
+      const fee = lqNum(f.fee) || 0;
+      if (!lqSane(fee)) continue;
       const asset = C.cleanInstrument(String(f.asset || f.coin || '')) || 'UNKNOWN';
       const time = iso.slice(11, 16);
       const ref = `LQ-${f.txHash || iso}-${f.side || ''}-${size}-${px}`;
       const gross = f.closedPnl == null || f.closedPnl === '' ? null : lqNum(f.closedPnl);
-      if (gross != null) {
-        const long = /long/i.test(String(f.direction || ''));
+      if (gross != null && lqSane(gross)) {
+        // A close with no size cannot have produced that P&L from a price move, so there is no
+        // entry to recover and nothing honest to record.
+        if (size <= 0) continue;
+        const d = String(f.direction || ''), sd = String(f.side || '').toLowerCase();
+        // direction is the truth when it is there; otherwise a close that sold was a long
+        const long = /long/i.test(d) ? true : /short/i.test(d) ? false
+          : sd === 'sell' || sd === 'a' ? true : sd === 'buy' || sd === 'b' ? false : null;
+        if (long == null) continue;
         // closedPnl = (close − open) × size for a long, and the mirror of that for a short
-        const open = size > 0 ? (long ? px - gross / size : px + gross / size) : px;
+        const open = long ? px - gross / size : px + gross / size;
+        if (!lqSane(open)) continue;
         out.push({ kind: 'trade', date, time, instrument: asset,
           direction: long ? 'BUY' : 'SELL', size: String(size),
-          openLevel: Math.round(open * 1e6) / 1e6, closeLevel: px,
-          currency: 'USD', pnl: Math.round((gross - fee) * 100) / 100,
+          openLevel: Number(open.toPrecision(12)), closeLevel: px,
+          // kept to six places, not two: a venue can settle in fractions of a cent, and rounding
+          // every row to money before summing them builds in a drift the totals never lose
+          currency: 'USD', pnl: Math.round((gross - fee) * 1e6) / 1e6,
           reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
-      } else if (fee > 0) {
+      } else if (fee !== 0) {
         out.push({ kind: 'cost', date, time, instrument: asset, direction: '', size: String(size),
-          currency: 'USD', pnl: -Math.round(fee * 100) / 100,
+          currency: 'USD', pnl: -Math.round(fee * 1e6) / 1e6,
           reference: ref, openTs: '', closeTs: iso, account: 'Liquid' });
       }
     }
@@ -5790,13 +5838,21 @@ if (typeof module !== 'undefined') module.exports = AN;
     }).filter(Boolean);
     // `dir` already reads "Open Long" / "Close Long", and closedPnl is only on the closing side —
     // which is exactly the half that is a trade
-    const rows = (Array.isArray(fills) ? fills : []).map(f => ({
-      time: new Date(Number(f.time)).toISOString(), timeMs: Number(f.time), type: 'Trade',
-      asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
-      size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
-      ...(f.closedPnl == null || f.closedPnl === '' ? {} : { closedPnl: String(f.closedPnl) }),
-      txHash: f.hash || f.tid || '',
-    }));
+    const rows = [];
+    for (const f of Array.isArray(fills) ? fills : []) {
+      // new Date(NaN).toISOString() throws, and one bad row must not cost you the response
+      const ms = Number(f && f.time);
+      if (!isFinite(ms)) continue;
+      const when = new Date(ms);
+      if (!isFinite(when.getTime())) continue;
+      rows.push({
+        time: when.toISOString(), timeMs: ms, type: 'Trade',
+        asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
+        size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
+        ...(f.closedPnl == null || f.closedPnl === '' ? {} : { closedPnl: String(f.closedPnl) }),
+        txHash: f.hash || f.tid || '',
+      });
+    }
     return { account, positions, rows };
   }
   async function syncLiquid(silent) {
@@ -5819,6 +5875,9 @@ if (typeof module !== 'undefined') module.exports = AN;
       } else {
         parsed = await fetchHyperliquid(lqAddr(), String(cfg.liquidDex || '').trim());
       }
+      // Same the other way round: applyLiquid appends to S.trades, which is now the IG ledger if
+      // the venue changed while Liquid was answering.
+      if (S.venue !== 'liquid') return;
       const added = applyLiquid(parsed);
       lqFails = 0;
       persist();
@@ -5995,6 +6054,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (!C.isIGJson(data)) throw new Error('The sync endpoint did not return IG transaction data.');
       const parsed = C.importIGTransactions(data.transactions);
       if (parsed.error) throw new Error(parsed.error);
+      // The books are separate ledgers and this one replaces every trade in the open book. IG can
+      // take seconds to answer, and if the venue moved in that time this would wipe the other
+      // book's history and persist() would make it permanent. Come back to it instead.
+      if (S.venue !== 'ig') { igStale = true; return; }
       S.activityJson = Array.isArray(data.activity) ? data.activity : null;
       S.trades = C.mergeTrades([], parsed.trades).trades;
       if (!silent) {
@@ -6024,6 +6087,8 @@ if (typeof module !== 'undefined') module.exports = AN;
   // when a position closes, so a close event triggers one full sync instead.
   const syncBase = () => (S.settings.syncUrl || '').replace(/\/+$/, '').replace(/\/(sync|health|positions)$/, '');
   let pollTimer = null, pollFails = 0, lastOpenIds = null, lastFullSync = 0;
+  // set when a sync was thrown away because the venue had moved on, so returning to IG re-runs it
+  let igStale = false;
 
   async function fetchPositions() {
     const base = syncBase(); if (!base) return;
@@ -6049,12 +6114,19 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.posError = String(err.message || err); pollFails++;
     }
     S.posBusy = false;
-    if (S.section === 'open') {
+    // On another book this poll exists only to watch an armed stop; the open tab there belongs to
+    // that venue, and rendering IG positions into it would show the wrong broker's page.
+    if (S.venue === 'ig' && S.section === 'open') {
       renderOpen();
       // Fold the new tick into the forming bar, then repaint the canvas only — re-rendering the
       // whole panel every two seconds would throw away the pointer and the scroll position.
-      if (chartState) { const moved = tickLiveCandle();
-        if (moved) { redrawChart(); paintOhlc(); } else if (!chartState.preview) renderChartPanel(); }
+      if (chartState) {
+        tickLiveCandle();
+        // The ticket's numbers come from the form it is composing, not from a feed, so that one
+        // only wants its canvas repainted. Everything else wants the stat row too — it carries the
+        // unrealised P&L, which used to refresh only on the polls where the price had NOT moved.
+        if (chartState.preview) { redrawChart(); paintOhlc(); } else refreshChartMeta();
+      }
     }
     renderNav();
   }
@@ -6064,6 +6136,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const ORDERS_EVERY = 20000;   // 3/min, leaving positions the bulk of IG's ~40/min budget
   async function fetchOrders(force) {
     const base = syncBase(); if (!base) return;
+    if (S.venue !== 'ig') return;      // nothing on another book reads them, and IG's budget is small
     if (S.ordBusy || (!force && Date.now() - S.ordAt < ORDERS_EVERY)) return;
     S.ordBusy = true; S.ordAt = Date.now();
     try {
@@ -6073,7 +6146,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.orders = applyFx(computeOrders(data.orders)); S.ordFetched = data.fetched; S.ordError = null;
     } catch (err) { S.ordError = String(err.message || err); }
     S.ordBusy = false;
-    if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
+    if (S.venue === 'ig' && S.section === 'open') { renderOpen(); if (chartState) refreshChartMeta(); }
   }
 
   function pollInterval() {
@@ -6081,9 +6154,12 @@ if (typeof module !== 'undefined') module.exports = AN;
     return pollFails ? Math.min(base * Math.pow(2, pollFails), 60000) : base;   // back off on failure
   }
   function schedulePoll() {
-    if (S.venue !== 'ig') return;
     clearTimeout(pollTimer);
     if (RO || !S.settings.autoSync || !S.settings.syncUrl) return;
+    // The other book is a different broker and has no use for IG prices — but a stop armed here is
+    // armed against a real position, and dropping the poll would quietly stop watching it while
+    // the page still says it is armed.
+    if (S.venue !== 'ig' && !anyArmed() && !anyLadder()) return;
     // A hidden tab normally has nothing worth watching — unless a stop is armed, in which case
     // stopping would quietly disarm it. Browsers throttle background timers to about once a
     // minute, so it keeps working but coarsely; that limit is stated wherever a stop is armed.
@@ -6097,7 +6173,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (RO || !S.settings.autoSync || !S.settings.syncUrl) return;
     fetchPositions().then(schedulePoll);
     fetchOrders(true);
-    if (Date.now() - lastFullSync > 5 * 60 * 1000) runSync(true);   // safety net for fees and cash rows
+    if (igStale || Date.now() - lastFullSync > 5 * 60 * 1000) { igStale = false; runSync(true); }
   }
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (!anyArmed() && !anyLadder()) clearTimeout(pollTimer); }
@@ -6551,7 +6627,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       else if (a === 'settings') openSettings();
       else if (a === 'sync') { if (S.venue === 'liquid') syncLiquid(false); else runSync(false); }
       else if (a === 'save-settings') saveSettings();
-      else if (a === 'demo') review({ trades: demoTrades(), stats: { trades: 25, costs: 0, cash: 1, unreadable: 0 }, error: '', columns: {} }, 'demo', 'Demo');
+      else if (a === 'demo') {
+        // The demo set is IG-shaped — sterling, index names, broker stops. Loading it into the
+        // Liquid book would replace real Liquid history with sample data from another venue.
+        if (S.venue !== 'ig') toast('The demo set belongs to the IG book. Switch to IG to load it, or paste your Liquid data here.', 8000);
+        else review({ trades: demoTrades(), stats: { trades: 25, costs: 0, cash: 1, unreadable: 0 }, error: '', columns: {} }, 'demo', 'Demo');
+      }
       else if (a === 'export') download(`trades-${today}.csv`, csv(S.trades)); else if (a === 'export-rows') download(`trades-filtered-${today}.csv`, csv(renderTable.rows || []));
       else if (a === 'snapshot') exportSnapshot();
       else if (a === 'backup') download(`ledger-backup-${today}.json`, JSON.stringify({ exported: new Date().toISOString(), trades: S.trades, settings: safeSettings(), theme: S.theme, activity: S.activity }, null, 1), 'application/json');
