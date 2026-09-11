@@ -2366,7 +2366,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.7.0';
+  const APP_VERSION = 'v9.7.1';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5930,6 +5930,15 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (fresh.length) {
         S.trades = S.trades.concat(fresh.map(t => ({ ...t, id: C.tradeKey(t) })))
           .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+      }
+      // Both legs of a two-sided event come back on every poll, so clearing the twin once at load
+      // is not enough — it is re-filed a second later and the repair looks like it did nothing.
+      const kept = dropReversalTwins(S.trades);
+      if (kept.length !== S.trades.length) {
+        const have = new Set(kept.map(t => t.reference));
+        for (const f of fresh) if (f.kind === 'trade' && !have.has(f.reference)) added--;
+        S.trades = kept;
+        if (added < 0) added = 0;
       }
     }
     S.lq.fetched = new Date().toISOString();

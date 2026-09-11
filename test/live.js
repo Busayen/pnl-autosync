@@ -2058,6 +2058,22 @@ async function liquidTwinRepair(browser) {
   check('so the day total loses only what was counted twice',
     Math.abs(all.reduce((a, t) => a + t.pnl, 0) - 29.57) < 1e-9,
     String(all.reduce((a, t) => a + t.pnl, 0)));
+  // and it must stay cleared: the same two legs arrive again on the very next poll
+  state.lqRows = [
+    { time: '2026-09-09T22:02:11.000Z', asset: '#19310', side: 'sell', direction: '', size: '75',
+      price: '1', fee: '0', closedPnl: '29.97', txHash: '0xrev' },
+    { time: '2026-09-09T22:02:11.000Z', asset: '#19310', side: 'buy', direction: '', size: '75',
+      price: '1', fee: '0', closedPnl: '29.97', txHash: '0xrev' },
+  ];
+  await page.waitForTimeout(7000);
+  const resynced = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+  check('a poll that re-sends both legs does not put the twin back',
+    resynced.filter(t => t.time === '22:02').length === 1,
+    JSON.stringify(resynced.map(t => `${t.time}:${t.direction}:${t.pnl}`)));
+  check('and the day is still counted once',
+    Math.abs(resynced.reduce((a, t) => a + t.pnl, 0) - 29.57) < 1e-9,
+    String(resynced.reduce((a, t) => a + t.pnl, 0)));
+
   check('no page errors clearing them', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
 }
