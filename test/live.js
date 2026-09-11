@@ -2062,6 +2062,91 @@ async function liquidTwinRepair(browser) {
   await page.context().close();
 }
 
+// Hyperliquid answers with the code a market was deployed under and holds no display name to give
+// instead. Nothing can derive one, so the name is whatever you say it is — and saying it has to
+// reach the trades already recorded, not just the next ones.
+async function liquidNaming(browser) {
+  state = { orders: [], positions: [], lqRows: [
+    { time: '2026-09-10T10:00:00.000Z', asset: 'xyz:CL', side: 'sell', direction: 'Close Long',
+      size: '10', price: '95', fee: '0.5', closedPnl: '4', txHash: '0xn1' },
+    { time: '2026-09-09T22:02:45.144Z', asset: '#19310', side: 'sell', direction: 'Close Long',
+      size: '75', price: '1', fee: '0.105', closedPnl: '30.075', txHash: '0xn2' },
+  ] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const rows = () => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades
+    .map(t => ({ code: t.code, name: t.instrument, pnl: t.pnl, ref: t.reference })));
+
+  const before = await rows();
+  check('a code with no name given reads as the code', before.some(t => t.name === 'xyz:CL'),
+    JSON.stringify(before.map(t => t.name)));
+  check('and the raw code is kept alongside it', before.every(t => !!t.code), JSON.stringify(before));
+
+  await page.evaluate(() => document.querySelector('[data-act="settings"]').click());
+  await page.waitForTimeout(500);
+  const listed = await page.evaluate(() => Array.from(document.querySelectorAll('[data-lqname]')).map(i => i.dataset.lqname).sort());
+  check('Settings lists every code the book has traded',
+    listed.includes('xyz:CL') && listed.includes('#19310'), JSON.stringify(listed));
+  check('and the ones it only holds a position in', listed.includes('WTIOIL'), JSON.stringify(listed));
+
+  await page.fill('[data-lqname="xyz:CL"]', 'WTIOIL');
+  await page.fill('[data-lqname="#19310"]', 'Prediction market 1931');
+  await page.evaluate(() => document.querySelector('[data-act="save-settings"]').click());
+  await page.waitForTimeout(600);
+
+  const after = await rows();
+  check('naming a code renames the trades already recorded',
+    after.find(t => t.code === 'xyz:CL').name === 'WTIOIL', JSON.stringify(after.map(t => t.name)));
+  check('including a prediction market',
+    after.find(t => t.code === '#19310').name === 'Prediction market 1931');
+  check('the money is untouched by a rename',
+    after.reduce((a, t) => a + t.pnl, 0) === before.reduce((a, t) => a + t.pnl, 0),
+    `${before.reduce((a, t) => a + t.pnl, 0)} -> ${after.reduce((a, t) => a + t.pnl, 0)}`);
+  check('and so is the reference a row is keyed on',
+    after.map(t => t.ref).sort().join('|') === before.map(t => t.ref).sort().join('|'));
+  check('the table shows the name', /WTIOIL/.test(await page.evaluate(() => document.querySelector('#table').innerText)));
+
+  // a position carries a code too, and renaming it must reach the open card
+  await page.evaluate(() => document.querySelector('[data-act="settings"]').click());
+  await page.waitForTimeout(500);
+  await page.fill('[data-lqname="WTIOIL"]', 'Crude oil');
+  await page.evaluate(() => document.querySelector('[data-act="save-settings"]').click());
+  await page.waitForTimeout(600);
+  await page.evaluate(() => document.querySelector('[data-section="open"]').click());
+  await page.waitForTimeout(500);
+  check('renaming reaches the open position too',
+    /Crude oil/.test(await page.evaluate(() => document.querySelector('#open').innerText)),
+    await page.evaluate(() => (document.querySelector('#open').innerText || '').slice(0, 120)));
+
+  // the next sync must keep the name, not overwrite it with the code again
+  await page.waitForTimeout(7000);
+  const synced = await rows();
+  check('a later sync keeps the name rather than reverting to the code',
+    synced.find(t => t.code === 'xyz:CL').name === 'WTIOIL', JSON.stringify(synced.map(t => t.name)));
+  check('and adds nothing by renaming', synced.length === after.length, `${after.length} -> ${synced.length}`);
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1400);
+  check('the name survives a reload', (await rows()).find(t => t.code === 'xyz:CL').name === 'WTIOIL');
+
+  // clearing it puts the code back, so a rename is never a one-way door
+  await page.evaluate(() => document.querySelector('[data-act="settings"]').click());
+  await page.waitForTimeout(500);
+  await page.fill('[data-lqname="xyz:CL"]', '');
+  await page.evaluate(() => document.querySelector('[data-act="save-settings"]').click());
+  await page.waitForTimeout(600);
+  check('clearing a name puts the code back', (await rows()).find(t => t.code === 'xyz:CL').name === 'xyz:CL');
+
+  check('no page errors naming instruments', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -2084,6 +2169,7 @@ async function liquidTwinRepair(browser) {
       ['liquid conversion edges', liquidEdges],
       ['liquid fill folding', liquidFillFolding], ['liquid fill migration', liquidFillMigration],
       ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
+      ['liquid naming', liquidNaming],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],
       ['order ticket chart', ticketChart]]) {

@@ -1009,6 +1009,10 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 
 .symlink { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; border-bottom: 1px dashed var(--border-strong); }
 .symlink:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.lqname { display: grid; grid-template-columns: minmax(90px, 34%) 1fr; gap: 8px; align-items: center; margin-bottom: 6px; }
+.lqname code { font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lqname input { width: 100%; }
+@media (max-width: 520px) { .lqname { grid-template-columns: 1fr; gap: 3px; } }
 #chartpanel:empty { display: none; }
 #tvpanel:empty { display: none; }
 #tvpanel { margin-top: 20px; }
@@ -1273,6 +1277,11 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
         <div class="field full"><label for="s-lqurl">Liquid sync URL <span class="dim">(instead of the address)</span></label><input type="text" id="s-lqurl" placeholder="https://ig-sync.yourname.workers.dev/liquid">
           <div class="help">Anything that answers with Liquid's own shapes — <code>positions</code>, <code>rows</code>, or both. Takes precedence over the address above. Leave both blank and you paste by hand.</div></div>
         <div class="field"><label for="s-lqtoken">Liquid sync token</label><input type="password" id="s-lqtoken" placeholder="optional" autocomplete="off"><div class="help">Sent as a bearer token, if your endpoint wants one.</div></div>
+        <div class="field full"><label>Liquid instrument names</label><div id="s-lqnames"></div>
+          <div class="help">Hyperliquid answers in the codes the market was deployed under — <code>xyz:CL</code> for oil,
+            <code>#19310</code> for a prediction market — and holds no display name to give instead. Every code your book has
+            seen is listed above; whatever you type replaces it everywhere, including trades already recorded. Renaming is
+            safe and reversible: rows are keyed on the block they settled in, never on the name.</div></div>
         <div class="field"><label for="s-lqsecs">Liquid refresh (seconds)</label><input type="number" id="s-lqsecs" min="5" step="1"><div class="help">Positions move with the price; realised history barely changes. 15s is plenty.</div></div>
         <div class="field"><label for="s-synctoken">Sync token</label><input type="password" id="s-synctoken" placeholder="the SYNC_TOKEN you set on the worker"><div class="help">Reads history only. Not your IG password, which stays at Cloudflare.</div></div>
         <div class="field"><label for="s-syncdays">Sync range (days back)</label><input type="number" id="s-syncdays" placeholder="180" min="1" max="1095" step="1"></div>
@@ -2357,7 +2366,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.6.3';
+  const APP_VERSION = 'v9.7.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2386,7 +2395,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const today = C.todayStr();
   const S = {
     trades: [], theme: 'dark', section: 'overview',
-    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', liquidUrl: '', liquidToken: '', liquidAddress: '', liquidDex: 'xyz', liquidAuto: true, liquidSecs: 15, fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
+    settings: { currency: '', balance: '', weekStart: 'mon', dateOrder: 'auto', heatScope: 'all', includeCosts: true, tags: [], rolling: 0, riskKeep: 25, splitOnDeposit: true, riskCapPct: 50, hideWeekends: true, profitColor: '', lossColor: '', syncUrl: '', syncToken: '', syncDays: 180, autoSync: true, pollSecs: 2, closeToken: '', orderToken: '', liquidUrl: '', liquidToken: '', liquidAddress: '', liquidDex: 'xyz', lqNames: {}, liquidAuto: true, liquidSecs: 15, fx: {}, tv: { on: false, symbols: {} }, softStops: {} },
     f: { tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' },
     cal: { y: +today.slice(0, 4), m: +today.slice(5, 7) - 1 }, selectedDay: null,
     sort: { key: 'date', dir: 'desc' }, query: '', kind: 'all', showAll: false, side: 'BUY',
@@ -5711,6 +5720,31 @@ if (typeof module !== 'undefined') module.exports = AN;
   // and drags a win rate down with legs that are nothing but the fee. Every fill matched in the same
   // block carries that block's hash, so that is what they are folded on. A trade id would not do:
   // that is per fill, which is the thing being folded away.
+  // Hyperliquid answers with the code a market was deployed under and has no display name to give
+  // instead — "xyz:CL" is oil, "#19310" a prediction market. Nothing can derive one, so this is
+  // whatever you have told it. Rows carry the raw code alongside, so a rename reaches history too
+  // and can be undone; they are keyed on the block they settled in, never on the name.
+  const lqName = code => {
+    const raw = String(code || '');
+    const set = String((S.settings.lqNames || {})[raw] || '').trim();
+    return set || raw;
+  };
+  // every Liquid code the book has seen, so Settings can list them rather than ask you to recall them
+  const lqCodes = () => {
+    const seen = new Set();
+    for (const t of S.trades || []) if (t.account === 'Liquid' && t.code) seen.add(t.code);
+    for (const p of (S.lq && S.lq.positions) || []) if (p.code) seen.add(p.code);
+    return [...seen].sort();
+  };
+  function relabelLiquid(trades) {
+    for (const t of trades || []) {
+      if (!t || t.account !== 'Liquid') continue;
+      if (!t.code) t.code = t.instrument;      // written before the code was kept: it was the name
+      t.instrument = lqName(t.code);
+    }
+    return trades;
+  }
+
   const lqBlock = f => String(f.txHash || f.hash || '') || String(f.time || '');
   const lqKey = (block, asset, side) => `LQ2-${block}-${asset}-${side}`;
   // A sum of fills carries float noise its parts never had — 0.648 + 1.051 + 10 is 11.699000000000002
@@ -5768,7 +5802,8 @@ if (typeof module !== 'undefined') module.exports = AN;
 
     const out = [];
     for (const g of groups.values()) {
-      const base = { date: g.date, time: g.iso.slice(11, 16), instrument: g.asset, currency: 'USD',
+      const base = { date: g.date, time: g.iso.slice(11, 16),
+                     code: g.asset, instrument: lqName(g.asset), currency: 'USD',
                      size: String(lqTrim(g.size)), reference: g.key,
                      openTs: '', closeTs: g.iso, account: 'Liquid',
                      ...(g.fills > 1 ? { fills: g.fills } : {}) };
@@ -5796,7 +5831,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!Array.isArray(trades)) return trades;
     const old = t => t && t.account === 'Liquid' && typeof t.reference === 'string'
       && t.reference.startsWith('LQ-');
-    if (!trades.some(old)) return dropReversalTwins(trades);
+    if (!trades.some(old)) return relabelLiquid(dropReversalTwins(trades));
     const keep = [], groups = new Map();
     for (const t of trades) {
       if (!old(t)) { keep.push(t); continue; }
@@ -5821,7 +5856,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       merged.id = C.tradeKey(merged);
       keep.push(merged);
     }
-    return dropReversalTwins(keep.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)));
+    return relabelLiquid(dropReversalTwins(keep.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))));
   }
 
   // A reversal used to be booked twice, once from each half, because the opening half carried the
@@ -5848,7 +5883,8 @@ if (typeof module !== 'undefined') module.exports = AN;
 
   const lqPositions = list => (list || []).map(p => ({
     symbol: String(p.symbol || ''),
-    name: C.cleanInstrument(String(p.displayName || p.symbol || '')) || '—',
+    code: C.cleanInstrument(String(p.displayName || p.symbol || '')),
+    name: lqName(C.cleanInstrument(String(p.displayName || p.symbol || ''))) || '—',
     long: String(p.side || '').toLowerCase() !== 'short',
     size: lqNum(p.size), entry: lqNum(p.entryPx), mark: lqNum(p.markPx),
     leverage: lqNum(p.leverage), leverageType: String(p.leverageType || ''),
@@ -6424,6 +6460,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     $('#s-syncurl').value = s.syncUrl || ''; $('#s-synctoken').value = s.syncToken || ''; $('#s-syncdays').value = s.syncDays || 180;
     $('#s-lqurl').value = s.liquidUrl || ''; $('#s-lqtoken').value = s.liquidToken || ''; $('#s-lqsecs').value = s.liquidSecs || 15;
     $('#s-lqaddr').value = s.liquidAddress || ''; $('#s-lqdex').value = s.liquidDex == null ? 'xyz' : s.liquidDex;
+    const codes = lqCodes(), names = s.lqNames || {};
+    $('#s-lqnames').innerHTML = codes.length
+      ? codes.map(c => `<div class="lqname"><code>${esc(c)}</code><input type="text" data-lqname="${esc(c)}"
+          value="${esc(names[c] || '')}" placeholder="${esc(c)}" spellcheck="false" autocomplete="off"></div>`).join('')
+      : '<div class="dim" style="font-size:12px">Nothing yet. Sync or paste some Liquid data and the codes appear here.</div>';
     $('#s-autosync').classList.toggle('on', s.autoSync !== false);
     $('#s-pollsecs').value = s.pollSecs || 2; $('#s-closetoken').value = s.closeToken || ''; $('#s-ordertoken').value = s.orderToken || '';
     const ccys = fxCurrencies(), acctC = accountCcy() || 'your currency', seen = igRatesSeen();
@@ -6451,6 +6492,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     s.syncUrl = $('#s-syncurl').value.trim(); s.syncToken = $('#s-synctoken').value.trim(); s.syncDays = parseInt($('#s-syncdays').value) || 180;
     s.liquidUrl = $('#s-lqurl').value.trim(); s.liquidToken = $('#s-lqtoken').value.trim();
     s.liquidAddress = $('#s-lqaddr').value.trim(); s.liquidDex = $('#s-lqdex').value.trim();
+    const named = {};
+    document.querySelectorAll('[data-lqname]').forEach(i => {
+      const v = i.value.trim();
+      if (v && v !== i.dataset.lqname) named[i.dataset.lqname] = v;   // storing a name equal to the code is just noise
+    });
+    s.lqNames = named;
+    relabelLiquid(S.trades);
+    if (S.lq && S.lq.positions) S.lq.positions = S.lq.positions.map(p => ({ ...p, name: lqName(p.code) || p.name }));
     s.liquidSecs = Math.max(5, parseInt($('#s-lqsecs').value) || 15);
     s.autoSync = $('#s-autosync').classList.contains('on'); s.pollSecs = Math.max(2, parseFloat($('#s-pollsecs').value) || 2);
     s.closeToken = $('#s-closetoken').value.trim();

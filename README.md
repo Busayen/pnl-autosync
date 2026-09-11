@@ -153,6 +153,17 @@ counts as a loss the size of its fee — which is how a profitable day reads as 
 Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
 those live on Liquid.
 
+### Naming what comes back
+
+Hyperliquid answers with the code a market was deployed under — `xyz:CL` for oil, `#19310` for a
+prediction market — and holds no display name to give instead. Liquid has no public API to look one
+up in, so nothing can derive it: the name is whatever you say it is.
+
+**Settings → Liquid instrument names** lists every code your book has seen, each with a box. What
+you type replaces the code everywhere, including trades already recorded, and clearing it puts the
+code back. Renaming is safe: rows are keyed on the block they settled in, never on the name, so it
+changes no total and adds no row.
+
 ### Autosync
 
 Set a **Liquid wallet address** in Settings and the pasting stops. Hyperliquid's info endpoint is
