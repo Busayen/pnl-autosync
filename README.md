@@ -157,6 +157,25 @@ counts as a loss the size of its fee — which is how a profitable day reads as 
 Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
 those live on Liquid.
 
+### Wallet balance
+
+The venue answers with what the balance is now and never with what it was, so the only history that
+exists is the one this page keeps. **Overview** on the Liquid book carries a balance line, sampled
+from the account as it is read, with what is in margin against what is free.
+
+It begins when you start watching. It is not a record of anything before that, and it does not
+backfill — a book restored from a backup starts its line again from the first reading after.
+
+Sampling is deliberately sparse: roughly one point every five minutes, because a fifteen-second
+poll would be 5,760 a day and browser storage is not large. A jump is kept whatever the clock says,
+so a deposit or a position closing shows at full size rather than being smoothed away. Past about
+1,500 points the older half is thinned rather than dropped, so the shape of where the balance has
+been survives even as the detail in it coarsens.
+
+Balance is not the same as the equity curve beside it. That one is built from closed trades; this
+one moves with money in and out too, and carries unrealised swings the trade history never sees.
+They are meant to disagree.
+
 ### Naming what comes back
 
 Hyperliquid answers with the code a market was deployed under — `xyz:CL` for oil, `#19310` for a

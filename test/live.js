@@ -38,7 +38,8 @@ function serve(dir) {
       if (state.lqStatus && state.lqStatus !== 200) return json(state.lqStatus, { error: 'liquid upstream is down' });
       const send = (c, o) => state.lqDelay ? setTimeout(() => json(c, o), state.lqDelay) : json(c, o);
       return send(200, {
-        account: { equity: '82.62', margin_used: '81.94', available_balance: '0.68', username: 'busayen' },
+        account: { equity: state.lqEquity || '82.62', account_value: state.lqEquity || '82.62',
+                   margin_used: '81.94', available_balance: '0.68', username: 'busayen' },
         positions: [{ symbol: 'xyz:CL-PERP', side: 'long', size: '14.183', entryPx: '94.479',
           markPx: String(state.lqMark || 95.465), leverage: '20', leverageType: 'isolated',
           unrealizedPnl: String(state.lqPnl == null ? 14.2 : state.lqPnl), liquidationPx: '92.0035',
@@ -2233,6 +2234,75 @@ async function predictionMarkets(browser) {
   await page.context().close();
 }
 
+// The venue reports what the balance is now and never what it was, so a history only exists if the
+// page keeps one. Which means it has to keep it sparsely, survive a reload, and not rebuild the
+// whole dashboard every fifteen seconds to show it.
+async function walletBalance(browser) {
+  state = { orders: [], positions: [], lqRows: [], lqEquity: '122.80' };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const bal = () => page.evaluate(() => ((JSON.parse(localStorage.getItem('ledger:v4')).lq || {}).bal) || []);
+  const shown = () => page.evaluate(() => ({
+    hidden: getComputedStyle(document.querySelector('#lqbal-card')).display === 'none',
+    meta: (document.querySelector('#lqbal-meta') || {}).innerText || '',
+    sub: (document.querySelector('#lqbal-sub') || {}).textContent || '',
+    // innerText on a display:none node still reads its text, so ask whether it is showing
+    empty: document.querySelector('#lqbal-empty').classList.contains('hidden') ? ''
+      : document.querySelector('#lqbal-empty').textContent,
+  }));
+
+  const b1 = await bal();
+  check('the balance is recorded the first time it is read', b1.length === 1, JSON.stringify(b1));
+  check('at the value the account reports', b1[0] && b1[0][1] === 122.8, JSON.stringify(b1[0]));
+  const v1 = await shown();
+  check('and the card is shown on the Liquid book', !v1.hidden, JSON.stringify(v1));
+  check('with the balance on it', /122\.80/.test(v1.meta), v1.meta);
+  check('and what is margin against what is free', /margin/.test(v1.sub) && /free/.test(v1.sub), v1.sub);
+  check('but nothing plotted from a single reading', /starts once/.test(v1.empty), v1.empty);
+
+  // a poll that only moves the balance a little must not fill the store with near-identical points
+  await page.waitForTimeout(7000);
+  check('small moves inside the window are not kept', (await bal()).length === 1,
+    JSON.stringify(await bal()));
+
+  // a jump is the part worth seeing, so it is kept whatever the clock says
+  state.lqEquity = '260.40';
+  await page.waitForTimeout(7000);
+  const b2 = await bal();
+  check('a jump is recorded straight away', b2.length === 2, JSON.stringify(b2));
+  check('at the new value', b2[1] && b2[1][1] === 260.4, JSON.stringify(b2[1]));
+  const v2 = await shown();
+  check('the line is drawn once there are two readings', v2.empty === '', v2.empty);
+  check('and it says what has changed since it started watching',
+    /\+/.test(v2.meta) && /137\.60/.test(v2.meta), v2.meta);
+
+  // the chart must own its canvas: a poll that changes nothing should not rebuild the page
+  await page.evaluate(() => { window.__eq = Chart.getChart(document.querySelector('#equity')); });
+  await page.waitForTimeout(7000);
+  check('a poll that changed no trade leaves the rest of the page alone',
+    await page.evaluate(() => window.__eq === Chart.getChart(document.querySelector('#equity'))));
+  check('and only one chart is ever bound to the balance canvas',
+    await page.evaluate(() => !!Chart.getChart(document.querySelector('#lqbal'))));
+
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1600);
+  check('the history survives a reload', (await bal()).length >= 2, JSON.stringify(await bal()));
+
+  // the other book has no wallet, so the card has no business there
+  await page.selectOption('#venue', 'ig');
+  await page.waitForTimeout(700);
+  check('and the card is not shown on IG', (await shown()).hidden);
+
+  check('no page errors tracking the balance', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -2256,6 +2326,7 @@ async function predictionMarkets(browser) {
       ['liquid fill folding', liquidFillFolding], ['liquid fill migration', liquidFillMigration],
       ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
       ['prediction markets', predictionMarkets],
+      ['wallet balance', walletBalance],
       ['liquid naming', liquidNaming],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],

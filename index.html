@@ -1013,6 +1013,9 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 .lqname code { font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lqname input { width: 100%; }
 @media (max-width: 520px) { .lqname { grid-template-columns: 1fr; gap: 3px; } }
+/* The wallet is the Liquid book's. Tied to the venue itself rather than toggled from a draw,
+   which can only get out of step with it. */
+body:not([data-venue="liquid"]) #lqbal-card { display: none; }
 #chartpanel:empty { display: none; }
 #tvpanel:empty { display: none; }
 #tvpanel { margin-top: 20px; }
@@ -1159,6 +1162,15 @@ tbody tr:nth-child(even) { background: rgba(255,255,255,.012); }
 
       <!-- OVERVIEW -->
       <div class="section" data-sec="overview" style="display:grid;gap:20px">
+        <section class="card" id="lqbal-card">
+          <div class="card-head"><div class="card-title">Wallet balance<small id="lqbal-sub"></small></div>
+            <div class="chart-meta" id="lqbal-meta"></div></div>
+          <div class="chart-wrap" style="height:200px"><canvas id="lqbal"></canvas>
+            <div class="chart-empty hidden" id="lqbal-empty"></div></div>
+          <div class="chart-hint" style="padding:0 16px 12px">Sampled from the account as the page reads it.
+            The venue reports what the balance is now, never what it was, so this begins when you start
+            watching and is not a record of anything before that.</div>
+        </section>
         <section class="kpis" id="kpis"></section>
         <div class="kpi-note dim" id="kpi-note"></div>
         <section class="card">
@@ -2366,7 +2378,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.8.0';
+  const APP_VERSION = 'v9.9.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2646,6 +2658,49 @@ if (typeof module !== 'undefined') module.exports = AN;
     charts.push(new Chart(dctx, { type: 'line', data: { labels, datasets: [{ data: [0].concat(pts.map(p => p.dd)), borderColor: loss, backgroundColor: dg, fill: true, borderWidth: 1.5, tension: 0.3, pointRadius: 0 }] }, options: dopts }));
     $('#ms-note').textContent = ms.length ? `${plural(ms.length, 'milestone')} marked at each ${money(ms[0].level, 0)} step.` : '';
   }
+  // Balance is not P&L. It moves with money in and out as well as with results, and it carries
+  // unrealised swings the trade history never sees — so it gets its own line rather than being
+  // folded into the equity curve, where the two would quietly contradict each other.
+  function drawLiquidBalance() {
+    if (S.venue !== 'liquid' || !$('#lqbal-card')) return;
+    const bal = (S.lq && Array.isArray(S.lq.bal) ? S.lq.bal : []).filter(p => Array.isArray(p) && isFinite(p[1]));
+    const acc = (S.lq && S.lq.account) || null;
+    const now = acc ? lqNum(acc.account_value != null ? acc.account_value : acc.equity) : null;
+    const used = acc ? lqNum(acc.margin_used) : null, free = acc ? lqNum(acc.available_balance) : null;
+    $('#lqbal-sub').textContent = used != null || free != null
+      ? `${used != null ? `${moneyIn(used, 'USD')} in margin` : ''}${used != null && free != null ? ' · ' : ''}${free != null ? `${moneyIn(free, 'USD')} free` : ''}`
+      : '';
+    const first = bal.length ? bal[0][1] : null;
+    const move = first != null && now != null ? now - first : null;
+    $('#lqbal-meta').innerHTML = now == null ? ''
+      : `<span class="big num">${moneyIn(now, 'USD')}</span>`
+        + (move == null || bal.length < 2 ? '' : `<span class="range ${cls(move)}">${signed(move)} since ${fdate(new Date(bal[0][0]).toISOString().slice(0, 10), false)}</span>`);
+    const empty = $('#lqbal-empty');
+    if (bal.length < 2 || typeof Chart === 'undefined') {
+      empty.classList.remove('hidden');
+      empty.textContent = typeof Chart === 'undefined' ? 'Chart library failed to load.'
+        : 'Nothing plotted yet. The line starts once the balance has been read more than once.';
+      return;
+    }
+    empty.classList.add('hidden');
+    const col = move == null || move >= 0 ? cssVar('--profit') : cssVar('--loss');
+    // It repaints on its own clock, so it keeps its own handle rather than joining the pile
+    // killCharts empties — that way nothing double-destroys it and nothing leaks.
+    const prev = Chart.getChart($('#lqbal'));
+    if (prev) prev.destroy();
+    const ctx = $('#lqbal').getContext('2d');
+    const stamp = ms => { const d = new Date(ms);
+      return `${fdate(d.toISOString().slice(0, 10), false)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+    const opts = baseOpts({ tooltip: { callbacks: { label: c => moneyIn(c.parsed.y, 'USD') } } });
+    opts.scales.y.beginAtZero = false;          // a balance that never nears zero should not be drawn as if it might
+    new Chart(ctx, { type: 'line',
+      data: { labels: bal.map(p => stamp(p[0])), datasets: [{ data: bal.map(p => p[1]),
+        borderColor: col, backgroundColor: grad(ctx, col, 200), fill: true, borderWidth: 2,
+        tension: 0.25, pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: col,
+        pointHoverBorderColor: cssVar('--card'), pointHoverBorderWidth: 2 }] },
+      options: opts });
+  }
+
   // ---- open positions ----
   // Value per point per unit of size, derived from this instrument's own closed trades:
   // |pnl| / (|level move| x size). That is exact and needs no FX table, because the realised
@@ -5642,9 +5697,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     killCharts(); compute(); renderNav(); renderFilters(); renderKpis(); renderPerformance(); renderRisk(); renderTrends(); renderCal(); renderTable(); drawCharts();
   }
   function drawCharts() {
-    if (!S.trades.length) return;
+    // The balance is read from the account, not derived from trades, so it has something to show
+    // on a book that has not traded yet.
+    if (!S.trades.length) { if (S.section === 'overview') drawLiquidBalance(); return; }
     if (S.section === 'open') { renderOpen(); if (chartState) renderChartPanel(); }
-    switch (S.section) { case 'overview': drawEquity(); break; case 'performance': drawPerformance(); break; case 'risk': drawRisk(); break; case 'trends': drawTrends(); break; }
+    switch (S.section) { case 'overview': drawEquity(); drawLiquidBalance(); break; case 'performance': drawPerformance(); break; case 'risk': drawRisk(); break; case 'trends': drawTrends(); break; }
   }
   // ---- venues ----
   // IG and Liquid share nothing: different broker, different currency, different instruments, and
@@ -5912,12 +5969,38 @@ if (typeof module !== 'undefined') module.exports = AN;
 
   // One merge, whether the JSON was pasted or fetched. Positions replace; fills are added only if
   // their reference is new, so a poll that returns the same window over and over adds nothing.
+  // The venue answers with what the balance is now and never with what it was, so a history only
+  // exists if this keeps one. Deliberately sparse: a 15-second poll is 5,760 points a day and
+  // localStorage is not large. One sample every five minutes, unless the number actually jumps —
+  // a deposit or a position closing — which is the part worth seeing at full resolution.
+  const BAL_MIN = 5 * 60 * 1000, BAL_MAX = 1500;
+  function recordBalance(account) {
+    if (!account) return;
+    const v = lqNum(account.account_value != null ? account.account_value : account.equity);
+    if (v == null || !lqSane(v)) return;
+    S.lq.bal = Array.isArray(S.lq.bal) ? S.lq.bal : [];
+    const bal = S.lq.bal, last = bal[bal.length - 1], now = Date.now();
+    if (last) {
+      const moved = Math.abs(v - last[1]);
+      const jumped = moved > Math.max(0.5, Math.abs(last[1]) * 0.01);
+      if (!jumped && now - last[0] < BAL_MIN) return;
+      if (moved < 0.005 && now - last[0] < BAL_MIN) return;
+    }
+    bal.push([now, lqTrim(v)]);
+    if (bal.length > BAL_MAX) {
+      // thin the older half rather than dropping it: where the balance has been is the whole point
+      const cut = bal.length >> 1;
+      S.lq.bal = bal.slice(0, cut).filter((_, i) => i % 2 === 0).concat(bal.slice(cut));
+    }
+  }
+
   function applyLiquid(parsed) {
     S.lq = S.lq || emptyLq();
     if (parsed.positions) {
       S.lq.positions = lqPositions(parsed.positions);
       S.lq.account = parsed.account || S.lq.account;
     }
+    recordBalance(parsed.account || S.lq.account);
     let added = 0;
     if (parsed.rows) {
       const at = new Map(S.trades.map((t, i) => [t.reference, i]));
@@ -6046,7 +6129,16 @@ if (typeof module !== 'undefined') module.exports = AN;
       const added = applyLiquid(parsed);
       lqFails = 0;
       persist();
-      if (S.venue === 'liquid') { killCharts(); renderAll(); }
+      // Rebuilding the whole page every fifteen seconds throws away every chart, every tooltip and
+      // anything you were in the middle of. Only a poll that actually changed the book earns that;
+      // the rest just move the balance, so only the balance is repainted.
+      if (S.venue === 'liquid') {
+        if (added) { killCharts(); renderAll(); }
+        else {
+          if (S.section === 'overview') drawLiquidBalance();
+          if (S.section === 'open') renderLiquidOpen();
+        }
+      }
       if (!silent && added) toast(`Liquid: ${plural(added, 'new trade')}.`, 6000);
       else if (!silent) toast('Liquid is up to date.', 4000);
     } catch (e) {
