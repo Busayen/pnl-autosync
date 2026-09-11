@@ -2357,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.6.2';
+  const APP_VERSION = 'v9.6.3';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5932,7 +5932,10 @@ if (typeof module !== 'undefined') module.exports = AN;
     const positions = ((st && st.assetPositions) || []).map(a => {
       const q = (a && a.position) || {}, szi = Number(q.szi);
       if (!isFinite(szi) || szi === 0) return null;
-      return { symbol: dex ? `${dex}:${q.coin}` : String(q.coin || ''), displayName: q.coin,
+      // Hyperliquid already answers with the builder prefix on the coin — "xyz:CL", not "CL" —
+      // so naming the dex again makes "xyz:xyz:CL". Only add it where the coin has not got one.
+      const coin = String(q.coin || '');
+      return { symbol: dex && !coin.includes(':') ? `${dex}:${coin}` : coin, displayName: q.coin,
         side: szi < 0 ? 'short' : 'long', size: String(Math.abs(szi)),
         entryPx: q.entryPx ?? null, markPx: null,
         leverage: q.leverage && q.leverage.value != null ? String(q.leverage.value) : null,

@@ -1485,7 +1485,7 @@ const HL_STATE = {
   marginSummary: { accountValue: '82.62', totalMarginUsed: '81.94' },
   withdrawable: '0.68',
   assetPositions: [
-    { type: 'oneWay', position: { coin: 'CL', szi: '14.183', entryPx: '94.479', unrealizedPnl: '14.2',
+    { type: 'oneWay', position: { coin: 'xyz:CL', szi: '14.183', entryPx: '94.479', unrealizedPnl: '14.2',
       returnOnEquity: '0.212', leverage: { type: 'isolated', value: 20 }, liquidationPx: '92.0035', marginUsed: '81.94' } },
     // signed size: negative is a short, and the dashboard wants a side and an unsigned number
     { type: 'oneWay', position: { coin: 'ETH', szi: '-2.5', entryPx: '3000', unrealizedPnl: '-12',
@@ -1537,11 +1537,13 @@ async function hyperliquidDirect(browser) {
     return { pos: s.lq.positions || [], trades: s.trades.filter(t => t.kind === 'trade'),
              costs: s.trades.filter(t => t.kind === 'cost').length }; });
   check('a zero-size position is dropped', lq.pos.length === 2, JSON.stringify(lq.pos.map(p => p.name)));
-  const cl = lq.pos.find(p => p.name === 'CL'), eth = lq.pos.find(p => p.name === 'ETH');
+  const cl = lq.pos.find(p => p.name === 'xyz:CL'), eth = lq.pos.find(p => p.name === 'ETH');
   check('a positive size reads long', !!cl && cl.long && cl.size === 14.183, JSON.stringify(cl));
   check('a negative size reads short, with the sign taken off',
     !!eth && !eth.long && eth.size === 2.5, JSON.stringify(eth));
   check('leverage comes through', !!cl && cl.leverage === 20, JSON.stringify(cl && cl.leverage));
+  check('the builder prefix is not written twice onto a coin that already carries it',
+    !!cl && cl.symbol === 'xyz:CL', cl && cl.symbol);
   check('so does the liquidation price', !!cl && cl.liq === 92.0035);
   check('the closing fill becomes a trade', lq.trades.length === 1, JSON.stringify(lq.trades));
   check('a fill with an unreadable timestamp is skipped on its own',
