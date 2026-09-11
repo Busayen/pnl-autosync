@@ -2163,6 +2163,76 @@ async function liquidNaming(browser) {
   await page.context().close();
 }
 
+// A prediction market, in the shapes the endpoint really answers with. Entering one reads "Buy"
+// and realises nothing — closedPnl "0.0" with a fee — and it resolves as "Settlement", one fill
+// carrying the whole result. Neither word had been handled, and both were once read as closes,
+// which put a trade in the book that nothing since produces and nothing since overwrites.
+const HL_PRED = [
+  { coin: '#19310', px: '0.599', sz: '50.0', side: 'B', time: 1788947368199, startPosition: '25.0',
+    dir: 'Buy', closedPnl: '0.0', fee: '0.26954999', builderFee: '0.26954999', hash: '0xbuy' },
+  { coin: '#19310', px: '0.599', sz: '25.0', side: 'B', time: 1788947368199, startPosition: '0.0',
+    dir: 'Buy', closedPnl: '0.0', fee: '0.13477499', builderFee: '0.13477499', hash: '0xbuy' },
+  { coin: '#19310', px: '1.0', sz: '75.0', side: 'A', time: 1788991365144, startPosition: '75.0',
+    dir: 'Settlement', closedPnl: '30.075', fee: '0.1008', hash: '0xsettle' },
+];
+
+async function predictionMarkets(browser) {
+  state = { orders: [], positions: [], lqRows: HL_PRED.map(f => ({
+    time: new Date(f.time).toISOString(), asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy',
+    direction: f.dir, size: f.sz, price: f.px, fee: f.fee, closedPnl: f.closedPnl, txHash: f.hash })) };
+  const { page, errs } = await openPage(browser);
+  // seeded with what the older rules wrote from these very fills, which no sync replaces
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    s.venue = 'liquid';
+    s.books = { ig: { trades: s.trades }, liquid: { trades: [
+      { kind: 'trade', date: '2026-09-09', time: '09:49', instrument: '#19310', direction: 'SELL',
+        size: '75', openLevel: 0.599, closeLevel: 0.599, currency: 'USD', pnl: -0.404325,
+        reference: 'LQ2-0xbuy-#19310-S', openTs: '', closeTs: '2026-09-09T09:49:28.199Z',
+        account: 'Liquid', id: 'ref:LQ2-0xbuy-#19310-S' },
+      { kind: 'trade', date: '2026-09-09', time: '22:02', instrument: '#19310', direction: 'SELL',
+        size: '75', openLevel: 1.4, closeLevel: 1, currency: 'USD', pnl: 29.9742,
+        reference: 'LQ2-0xsettle-#19310-S', openTs: '', closeTs: '2026-09-09T22:02:45.144Z',
+        account: 'Liquid', id: 'ref:LQ2-0xsettle-#19310-S' },
+    ] } };
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(2500);
+  const rows = () => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+
+  const all = await rows();
+  check('the market leaves two rows, not four', all.length === 2,
+    JSON.stringify(all.map(t => `${t.time} ${t.kind} ${t.direction} ${t.pnl}`)));
+
+  const tr = all.filter(t => t.kind === 'trade'), fee = all.filter(t => t.kind === 'cost');
+  check('entering it is a fee, not a trade — nothing was realised', tr.length === 1 && fee.length === 1,
+    JSON.stringify(all.map(t => t.kind)));
+  check('both entry fills fold into that one fee', fee[0] && fee[0].fills === 2, JSON.stringify(fee[0]));
+  check('charged what the two legs actually cost',
+    fee[0] && Math.abs(fee[0].pnl + 0.40432498) < 1e-6, fee[0] && String(fee[0].pnl));
+
+  check('the settlement is the trade, on the side the position was held',
+    tr[0] && tr[0].direction === 'BUY', tr[0] && tr[0].direction);
+  check('worth the result less its fee', tr[0] && Math.abs(tr[0].pnl - 29.9742) < 1e-6,
+    tr[0] && String(tr[0].pnl));
+  check('and the entry recovers to what the outcome was bought at',
+    tr[0] && Math.abs(tr[0].openLevel - 0.599) < 1e-6, tr[0] && String(tr[0].openLevel));
+
+  check('rows the current rules no longer produce are cleared from the book',
+    !all.some(t => /-S$/.test(t.reference)), JSON.stringify(all.map(t => t.reference)));
+  check('the day is what the venue says it is',
+    Math.abs(all.reduce((a, t) => a + t.pnl, 0) - 29.56987502) < 1e-6,
+    String(all.reduce((a, t) => a + t.pnl, 0)));
+
+  // and it must stay cleared through the polls that follow
+  await page.waitForTimeout(7000);
+  check('and they do not come back on the next poll', (await rows()).length === 2,
+    JSON.stringify((await rows()).map(t => t.reference)));
+
+  check('no page errors reading a prediction market', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -2185,6 +2255,7 @@ async function liquidNaming(browser) {
       ['liquid conversion edges', liquidEdges],
       ['liquid fill folding', liquidFillFolding], ['liquid fill migration', liquidFillMigration],
       ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
+      ['prediction markets', predictionMarkets],
       ['liquid naming', liquidNaming],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],

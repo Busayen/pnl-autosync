@@ -2366,7 +2366,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.7.1';
+  const APP_VERSION = 'v9.8.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5775,7 +5775,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       // When the venue names the half — "Close Long", or a reversal's "Long > Short" — take it at
       // its word even at zero: a close that landed exactly flat still closed something. Only where
       // nothing is said does the money have to stand in for it.
-      const said = /^\s*close\b/i.test(d) || /^\s*liquidat/i.test(d) || d.includes('>');
+      // "Close Long", a reversal's "Long > Short", a liquidation, or "Settlement" — a prediction
+      // market resolving, which realises the whole position at once. Its opposite is "Buy"/"Sell",
+      // which is how an ordinary prediction entry reads: no position closed, only a fee paid.
+      const said = /^\s*(close|liquidat|settl)/i.test(d) || d.includes('>');
       const closing = !opening && gross != null && lqSane(gross) && (said || gross !== 0);
       let long = null;
       if (closing) {
@@ -5921,7 +5924,8 @@ if (typeof module !== 'undefined') module.exports = AN;
       const fresh = [];
       // A resting order can fill across two polls, so a block already filed may have grown a leg
       // since. Skipping it on the reference alone would leave the row short of its own trade.
-      for (const r of liquidRecords(parsed.rows)) {
+      const records = liquidRecords(parsed.rows);
+      for (const r of records) {
         const i = at.get(r.reference);
         if (i == null) { fresh.push(r); if (r.kind === 'trade') added++; continue; }
         const was = S.trades[i];
@@ -5931,8 +5935,16 @@ if (typeof module !== 'undefined') module.exports = AN;
         S.trades = S.trades.concat(fresh.map(t => ({ ...t, id: C.tradeKey(t) })))
           .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
       }
-      // Both legs of a two-sided event come back on every poll, so clearing the twin once at load
-      // is not enough — it is re-filed a second later and the repair looks like it did nothing.
+      // The stretch of time this window covers, it covers completely: these rules are the only
+      // thing that should have written a Liquid row inside it. One that matches nothing they now
+      // produce was written by an older rule — and no sync overwrites a row it never makes again,
+      // so it would sit there for good. Anything older than the window is left alone.
+      if (records.length) {
+        const refs = new Set(records.map(r => r.reference));
+        const from = records.reduce((a, r) => (r.closeTs < a ? r.closeTs : a), '9999');
+        S.trades = S.trades.filter(t => t.account !== 'Liquid' || !t.closeTs
+          || t.closeTs < from || refs.has(t.reference));
+      }
       const kept = dropReversalTwins(S.trades);
       if (kept.length !== S.trades.length) {
         const have = new Set(kept.map(t => t.reference));

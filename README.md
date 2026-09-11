@@ -135,6 +135,10 @@ is. And reversing a position closes one side and opens the other in one stroke: 
 that as two rows puts the same realised P&L on both halves, and taking the opening half at its word
 books the trade a second time on the opposite side. Only the half that closed realised anything.
 
+A prediction market reads differently from a perp. Entering one is `Buy` or `Sell` with a realised
+P&L of `0.0` — nothing closed, only a fee paid — and it ends as a single `Settlement` fill carrying
+the whole result. Both are handled by name.
+
 A close the venue names is a close even at zero: a trade that scratched still closed something, and
 its fee was still paid. Only where the venue names nothing does the money have to stand in for it.
 
