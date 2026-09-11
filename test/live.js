@@ -1971,6 +1971,9 @@ async function liquidReversals(browser) {
     // a reversal the other way: the short is the half that closed
     R({ time: '2026-09-09T20:00:00.000Z', asset: 'xyz:SP500', direction: 'Short > Long',
         size: '0.358', price: '6600', closedPnl: '-7.0', fee: '0.16', txHash: '0xflip' }),
+    // scratched: it closed, it just made nothing. The fee is still real, and so is the trade.
+    R({ time: '2026-09-09T19:00:00.000Z', asset: 'xyz:GOLD', direction: 'Close Long',
+        size: '0.038', price: '4397', closedPnl: '0.0', fee: '0.05', txHash: '0xflat' }),
   ] };
   const { page, errs } = await openPage(browser);
   await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
@@ -1998,6 +2001,12 @@ async function liquidReversals(browser) {
     cl.length === 1 && cl[0].kind === 'cost', JSON.stringify(cl.map(t => `${t.kind}:${t.pnl}`)));
   check('and it is the fee that was actually paid', cl[0] && Math.abs(cl[0].pnl + 0.62) < 1e-6,
     cl[0] && String(cl[0].pnl));
+
+  const flat = of('xyz:GOLD').filter(t => t.kind === 'trade');
+  check('a close that landed exactly flat is still a trade',
+    flat.length === 1 && flat[0].pnl === -0.05, JSON.stringify(of('xyz:GOLD').map(t => `${t.kind}:${t.pnl}`)));
+  check('and its entry is where it closed', flat[0] && flat[0].openLevel === flat[0].closeLevel,
+    flat[0] && `${flat[0].openLevel} / ${flat[0].closeLevel}`);
 
   const sp = of('xyz:SP500').filter(t => t.kind === 'trade');
   check('"Short > Long" closed the short, not the long',

@@ -135,6 +135,9 @@ is. And reversing a position closes one side and opens the other in one stroke: 
 that as two rows puts the same realised P&L on both halves, and taking the opening half at its word
 books the trade a second time on the opposite side. Only the half that closed realised anything.
 
+A close the venue names is a close even at zero: a trade that scratched still closed something, and
+its fee was still paid. Only where the venue names nothing does the money have to stand in for it.
+
 **One order is one trade, however many fills it took.** A market close eats several levels of the
 book and Hyperliquid reports each level separately — three rows for one exit is ordinary. Fills
 matched in the same block carry that block's hash, so they are folded back into the order they came

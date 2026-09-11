@@ -2357,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.6.1';
+  const APP_VERSION = 'v9.6.2';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5738,7 +5738,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       // second time, on the opposite side: one +$29.97 long and one +$29.97 short, same size,
       // same second.
       const opening = /^\s*open\b/i.test(d);
-      const closing = !opening && gross != null && lqSane(gross) && gross !== 0;
+      // When the venue names the half — "Close Long", or a reversal's "Long > Short" — take it at
+      // its word even at zero: a close that landed exactly flat still closed something. Only where
+      // nothing is said does the money have to stand in for it.
+      const said = /^\s*close\b/i.test(d) || /^\s*liquidat/i.test(d) || d.includes('>');
+      const closing = !opening && gross != null && lqSane(gross) && (said || gross !== 0);
       let long = null;
       if (closing) {
         // A close with no size cannot have produced that P&L from a price move, so there is no
