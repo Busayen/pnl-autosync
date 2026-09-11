@@ -1496,7 +1496,10 @@ const HL_STATE = {
 const HL_FILLS = [
   { coin: 'CL', px: '94.67', sz: '10.828', side: 'A', time: 1789005299646, dir: 'Close Long',
     closedPnl: '-4.699352', fee: '0.60111', hash: '0xbbb' },
-  { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long', fee: '0.586', hash: '0xccc' },
+  // Hyperliquid stamps every fill with closedPnl, "0.0" on the ones that opened a position. A
+  // fixture that left the field off hid a bug where that zero read as a realised result.
+  { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long',
+    closedPnl: '0.0', fee: '0.586', hash: '0xccc' },
   // one unreadable timestamp: new Date(NaN).toISOString() throws, and the throw used to take the
   // whole response with it — every good fill in it, on every poll from then on
   { coin: 'SOL', px: '150', sz: '3', side: 'A', time: 'not-a-time', dir: 'Close Long',
@@ -1951,6 +1954,103 @@ async function liquidFillMigration(browser) {
   await page.context().close();
 }
 
+// Reversing a position closes one side and opens the other in a single stroke. The venue reports
+// the realised P&L on it, and a venue that splits the stroke into two rows reports that same money
+// on both halves. Only the half that closed has realised anything.
+async function liquidReversals(browser) {
+  const R = o => ({ time: '2026-09-09T22:02:11.000Z', asset: '#19310', side: 'sell',
+    size: '75', price: '0.62', fee: '0.1', txHash: '0xrev', ...o });
+  state = { orders: [], positions: [], lqRows: [
+    // the shape that double counted: one reversal, reported as a close and an open, the same
+    // money on each — one +$29.97 long and one +$29.97 short, same size, same second
+    R({ direction: 'Close Long', closedPnl: '29.97', side: 'sell' }),
+    R({ direction: 'Open Short', closedPnl: '29.97', side: 'sell', fee: '0.2' }),
+    // an ordinary opening fill, stamped the way the live endpoint stamps one
+    R({ time: '2026-09-09T21:00:00.000Z', asset: 'xyz:CL', direction: 'Open Long', size: '10.725',
+        price: '94.1', closedPnl: '0.0', fee: '0.62', side: 'buy', txHash: '0xopen' }),
+    // a reversal the other way: the short is the half that closed
+    R({ time: '2026-09-09T20:00:00.000Z', asset: 'xyz:SP500', direction: 'Short > Long',
+        size: '0.358', price: '6600', closedPnl: '-7.0', fee: '0.16', txHash: '0xflip' }),
+  ] };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const all = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+  const of = n => all.filter(t => t.instrument === n);
+
+  const rev = of('#19310').filter(t => t.kind === 'trade');
+  check('a reversal reported as two halves is one trade, not one on each side',
+    rev.length === 1, JSON.stringify(of('#19310').map(t => `${t.kind}:${t.direction}:${t.pnl}`)));
+  check('and it is the half that closed', rev.length === 1 && rev[0].direction === 'BUY',
+    rev[0] && rev[0].direction);
+  check('the money is counted once', rev.length === 1 && Math.abs(rev[0].pnl - 29.87) < 1e-6,
+    rev[0] && String(rev[0].pnl));
+  check('the opening half still pays its fee', of('#19310').some(t => t.kind === 'cost' && Math.abs(t.pnl + 0.2) < 1e-6),
+    JSON.stringify(of('#19310').filter(t => t.kind === 'cost').map(t => t.pnl)));
+
+  const cl = of('xyz:CL');
+  check('an opening fill stamped closedPnl "0.0" is a fee, not a trade',
+    cl.length === 1 && cl[0].kind === 'cost', JSON.stringify(cl.map(t => `${t.kind}:${t.pnl}`)));
+  check('and it is the fee that was actually paid', cl[0] && Math.abs(cl[0].pnl + 0.62) < 1e-6,
+    cl[0] && String(cl[0].pnl));
+
+  const sp = of('xyz:SP500').filter(t => t.kind === 'trade');
+  check('"Short > Long" closed the short, not the long',
+    sp.length === 1 && sp[0].direction === 'SELL', JSON.stringify(sp.map(t => t.direction)));
+
+  check('no page errors reading reversals', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
+// A pair already written by the old rules stays written: no sync overwrites a row it will never
+// produce again. It has to be cleared where it sits.
+async function liquidTwinRepair(browser) {
+  state = { orders: [], positions: [], lqRows: [] };
+  const { page, errs } = await openPage(browser);
+  const twin = (ref, dir) => ({ kind: 'trade', date: '2026-09-09', time: '22:02', instrument: '#19310',
+    direction: dir, size: '75', openLevel: 0.22, closeLevel: 0.62, currency: 'USD', pnl: 29.97,
+    reference: ref, openTs: '', closeTs: '2026-09-09T22:02:11.000Z', account: 'Liquid', id: `ref:${ref}` });
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.venue = 'liquid';
+    s.books = { ig: { trades: s.trades }, liquid: { trades: [
+      { kind: 'trade', date: '2026-09-09', time: '22:02', instrument: '#19310', direction: 'BUY',
+        size: '75', openLevel: 0.22, closeLevel: 0.62, currency: 'USD', pnl: 29.97,
+        reference: 'LQ2-0xrev-#19310-L', openTs: '', closeTs: '2026-09-09T22:02:11.000Z',
+        account: 'Liquid', id: 'ref:LQ2-0xrev-#19310-L' },
+      { kind: 'trade', date: '2026-09-09', time: '22:02', instrument: '#19310', direction: 'SELL',
+        size: '75', openLevel: 1.02, closeLevel: 0.62, currency: 'USD', pnl: 29.97,
+        reference: 'LQ2-0xrev-#19310-S', openTs: '', closeTs: '2026-09-09T22:02:11.000Z',
+        account: 'Liquid', id: 'ref:LQ2-0xrev-#19310-S' },
+      // a genuine pair that must survive: same market and money, but hours apart
+      { kind: 'trade', date: '2026-09-09', time: '09:49', instrument: '#19310', direction: 'SELL',
+        size: '75', openLevel: 0.6, closeLevel: 0.59, currency: 'USD', pnl: -0.4,
+        reference: 'LQ2-0xearlier-#19310-S', openTs: '', closeTs: '2026-09-09T09:49:00.000Z',
+        account: 'Liquid', id: 'ref:LQ2-0xearlier-#19310-S' },
+    ] } };
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(1500);
+  const all = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades);
+
+  check('a pair already written on both sides is cleared to one',
+    all.filter(t => t.time === '22:02').length === 1,
+    JSON.stringify(all.map(t => `${t.time}:${t.direction}:${t.pnl}`)));
+  check('the money it stood for is kept once',
+    Math.abs(all.filter(t => t.time === '22:02').reduce((a, t) => a + t.pnl, 0) - 29.97) < 1e-9);
+  check('a real trade at another time is untouched',
+    all.filter(t => t.time === '09:49').length === 1, JSON.stringify(all.map(t => t.time)));
+  check('so the day total loses only what was counted twice',
+    Math.abs(all.reduce((a, t) => a + t.pnl, 0) - 29.57) < 1e-9,
+    String(all.reduce((a, t) => a + t.pnl, 0)));
+  check('no page errors clearing them', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -1972,6 +2072,7 @@ async function liquidFillMigration(browser) {
       ['hyperliquid direct', hyperliquidDirect],
       ['liquid conversion edges', liquidEdges],
       ['liquid fill folding', liquidFillFolding], ['liquid fill migration', liquidFillMigration],
+      ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],
       ['order ticket chart', ticketChart]]) {

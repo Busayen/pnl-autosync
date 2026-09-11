@@ -2357,7 +2357,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.6.0';
+  const APP_VERSION = 'v9.6.1';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5730,15 +5730,25 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (!lqSane(fee)) continue;
       const asset = C.cleanInstrument(String(f.asset || f.coin || '')) || 'UNKNOWN';
       const gross = f.closedPnl == null || f.closedPnl === '' ? null : lqNum(f.closedPnl);
-      const closing = gross != null && lqSane(gross);
+      const d = String(f.direction || ''), sd = String(f.side || '').toLowerCase();
+      // Only a close has a realised result. Hyperliquid stamps every fill with closedPnl — "0.0"
+      // on the ones that opened a position — so the field being there is not the signal; money
+      // having been realised is. A venue that reports a reversal as two rows sends the same
+      // realised P&L on both halves, and taking the opening half at its word books the trade a
+      // second time, on the opposite side: one +$29.97 long and one +$29.97 short, same size,
+      // same second.
+      const opening = /^\s*open\b/i.test(d);
+      const closing = !opening && gross != null && lqSane(gross) && gross !== 0;
       let long = null;
       if (closing) {
         // A close with no size cannot have produced that P&L from a price move, so there is no
         // entry to recover and nothing honest to record.
         if (size <= 0) continue;
-        const d = String(f.direction || ''), sd = String(f.side || '').toLowerCase();
+        // A reversal reads "Long > Short", and the half that closed is the one before the arrow.
+        // Matching /long/ against the whole of it calls "Short > Long" a long.
+        const head = d.split('>')[0];
         // direction is the truth when it is there; otherwise a close that sold was a long
-        long = /long/i.test(d) ? true : /short/i.test(d) ? false
+        long = /long/i.test(head) ? true : /short/i.test(head) ? false
           : sd === 'sell' || sd === 'a' ? true : sd === 'buy' || sd === 'b' ? false : null;
         if (long == null) continue;
       } else if (fee === 0) continue;         // an opening fill that cost nothing books nothing
@@ -5779,9 +5789,10 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Recovering the block from that reference folds them into exactly the rows a fresh sync now
   // produces, so the next sync recognises them instead of filing a second copy alongside.
   function foldStoredFills(trades) {
+    if (!Array.isArray(trades)) return trades;
     const old = t => t && t.account === 'Liquid' && typeof t.reference === 'string'
       && t.reference.startsWith('LQ-');
-    if (!Array.isArray(trades) || !trades.some(old)) return trades;
+    if (!trades.some(old)) return dropReversalTwins(trades);
     const keep = [], groups = new Map();
     for (const t of trades) {
       if (!old(t)) { keep.push(t); continue; }
@@ -5806,7 +5817,29 @@ if (typeof module !== 'undefined') module.exports = AN;
       merged.id = C.tradeKey(merged);
       keep.push(merged);
     }
-    return keep.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    return dropReversalTwins(keep.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)));
+  }
+
+  // A reversal used to be booked twice, once from each half, because the opening half carried the
+  // same realised P&L as the close. Nothing writes that row any more, but one already saved would
+  // sit there for good: no sync overwrites a row it never produces again. Two trades on one market
+  // at the same instant, the same size, the same money, on opposite sides are not two trades —
+  // there is no way to have held and closed both. The money is identical either way, so which of
+  // the pair survives changes no total; it goes by reference so every reload picks the same one.
+  function dropReversalTwins(trades) {
+    const seen = new Map(), out = [];
+    for (const t of trades) {
+      if (!t || t.kind !== 'trade' || t.account !== 'Liquid') { out.push(t); continue; }
+      const k = `${t.instrument}|${t.closeTs}|${t.size}|${t.pnl}`;
+      const twin = seen.get(k);
+      if (twin && twin.t.direction !== t.direction) {
+        if (String(t.reference) < String(twin.t.reference)) { out[twin.i] = t; seen.set(k, { t, i: twin.i }); }
+        continue;
+      }
+      if (!twin) seen.set(k, { t, i: out.length });
+      out.push(t);
+    }
+    return out;
   }
 
   const lqPositions = list => (list || []).map(p => ({

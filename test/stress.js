@@ -95,7 +95,7 @@ const LQ_PORTFOLIO = {"account":{"equity":"82.62","margin_used":"81.943019","ava
     "marginUsed":"81.943019","returnOnEquity":"0.2120563416","tp":"99.203","sl":"94.637","displayName":"WTIOIL"}]};
 // two closes of the same 95.104 entry, plus an opening fill that is only a fee so far
 const LQ_HISTORY = {"rows":[
-  {"time":"2026-09-10T03:00:41.256Z","asset":"WTIOIL","side":"buy","direction":"Open Long","size":"3.599","price":"94.48","fee":"0.199394","txHash":"0xaaa"},
+  {"time":"2026-09-10T03:00:41.256Z","asset":"WTIOIL","side":"buy","direction":"Open Long","size":"3.599","price":"94.48","fee":"0.199394","closedPnl":"0.0","txHash":"0xaaa"},
   {"time":"2026-09-10T01:54:59.646Z","asset":"WTIOIL","side":"sell","direction":"Close Long","size":"10.828","price":"94.67","fee":"0.60111","closedPnl":"-4.699352","txHash":"0xbbb"},
   {"time":"2026-09-10T01:54:59.646Z","asset":"WTIOIL","side":"sell","direction":"Close Long","size":"5.155","price":"94.671","fee":"0.286179","closedPnl":"-2.232115","txHash":"0xbbb"}]};
 

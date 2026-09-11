@@ -129,6 +129,12 @@ long, and the mirror for a short. Two closes off the same entry both resolve to 
 which is how you know it is right. Each closed trade is recorded net of its closing fee; an opening
 fill has no result yet but its fee is already paid, so that lands on its own day as a cost.
 
+**Only a close is a trade.** Hyperliquid stamps every fill with a realised P&L — `0.0` on the ones
+that opened a position — so the field being present is not the signal; money having been realised
+is. And reversing a position closes one side and opens the other in one stroke: a venue that reports
+that as two rows puts the same realised P&L on both halves, and taking the opening half at its word
+books the trade a second time on the opposite side. Only the half that closed realised anything.
+
 **One order is one trade, however many fills it took.** A market close eats several levels of the
 book and Hyperliquid reports each level separately — three rows for one exit is ordinary. Fills
 matched in the same block carry that block's hash, so they are folded back into the order they came
