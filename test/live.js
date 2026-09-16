@@ -45,6 +45,7 @@ function serve(dir) {
           unrealizedPnl: String(state.lqPnl == null ? 14.2 : state.lqPnl), liquidationPx: '92.0035',
           marginUsed: '81.94', returnOnEquity: '0.212', tp: '99.203', sl: '94.637', displayName: 'WTIOIL' }],
         rows: (state.lqRows || []),
+        transfers: (state.lqMoves || []),
       });
     }
     if (p === '/markets') {
@@ -1531,8 +1532,14 @@ async function hyperliquidDirect(browser) {
   check('both info calls are made', seen.length >= 2, JSON.stringify(seen.map(b => b.type)));
   check('each carries the wallet address',
     seen.every(b => b.user === '0x1111111111111111111111111111111111111111'), JSON.stringify(seen[0]));
-  check('and the builder prefix, without which the answer is empty',
-    seen.every(b => b.dex === 'xyz'), JSON.stringify(seen[0]));
+  // Positions and fills are the builder dex's and need naming as such. Money in and out is the
+  // account's — the same USDC whichever dex it was traded on — so that one is asked account-wide.
+  check('and the builder prefix on what belongs to the dex',
+    seen.filter(b => /clearinghouseState|userFills/.test(b.type)).every(b => b.dex === 'xyz'),
+    JSON.stringify(seen.map(b => `${b.type}:${b.dex || '-'}`)));
+  check('but not on the ledger, which is the account\'s',
+    seen.filter(b => /LedgerUpdates/.test(b.type)).every(b => b.dex == null),
+    JSON.stringify(seen.map(b => `${b.type}:${b.dex || '-'}`)));
 
   const lq = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
     return { pos: s.lq.positions || [], trades: s.trades.filter(t => t.kind === 'trade'),
@@ -2353,6 +2360,76 @@ async function calendarImage(browser) {
   await tiny.page.context().close();
 }
 
+// The balance before the page was watching is not lost, only unwritten: every fill and every
+// transfer is a known change to it. Walking those back from a reading you did observe rebuilds it.
+// Shapes and magnitudes here are the account's own — a deposit, a referral-sized receive, a send
+// out, and closes either side of them.
+const LQ_MOVES = [
+  { time: '2026-09-08T12:00:00.000Z', timeMs: Date.parse('2026-09-08T12:00:00.000Z'), type: 'Deposit', asset: 'USDC', value: '23.24' },
+  { time: '2026-09-09T06:00:00.000Z', timeMs: Date.parse('2026-09-09T06:00:00.000Z'), type: 'Receive', asset: 'USDC', value: '0.343998' },
+  { time: '2026-09-09T12:00:00.000Z', timeMs: Date.parse('2026-09-09T12:00:00.000Z'), type: 'Send', asset: 'USDC', value: '0.10' },
+  { time: '2026-09-09T18:00:00.000Z', timeMs: Date.parse('2026-09-09T18:00:00.000Z'), type: 'Staking', asset: 'USDC', value: '5' },
+];
+const LQ_PAST = [
+  { time: '2026-09-08T18:00:00.000Z', asset: 'xyz:CL', side: 'sell', direction: 'Close Long',
+    size: '10', price: '95', fee: '0.5', closedPnl: '4', txHash: '0xp1' },
+  { time: '2026-09-09T09:00:00.000Z', asset: 'xyz:CL', side: 'sell', direction: 'Close Long',
+    size: '5', price: '94', fee: '0.25', closedPnl: '-2', txHash: '0xp2' },
+];
+
+async function balanceBackfill(browser) {
+  state = { orders: [], positions: [], lqRows: LQ_PAST, lqMoves: LQ_MOVES, lqEquity: '100' };
+  const { page, errs } = await openPage(browser);
+  await page.evaluate(p => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    s.settings.liquidUrl = `http://localhost:${p}/liquid`; s.settings.liquidSecs = 5;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); }, PORT);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.selectOption('#venue', 'liquid');
+  await page.waitForTimeout(2000);
+  const lq = () => page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).lq || {});
+
+  const a = await lq();
+  check('the line reaches back past the first reading', (a.bal || []).length > 1,
+    JSON.stringify((a.bal || []).length));
+  check('and says so', a.backfilled === true);
+
+  // the anchor is the first real reading, so reconstruction and samples meet without a step
+  const bal = a.bal, live = bal[bal.length - 1];
+  check('the newest point is the reading that was actually taken', live[1] === 100, JSON.stringify(live));
+
+  // walking forward again from the oldest point must land back on it
+  const moves = [['2026-09-08T12:00:00.000Z', 23.24], ['2026-09-08T18:00:00.000Z', 3.5],
+                 ['2026-09-09T06:00:00.000Z', 0.343998], ['2026-09-09T09:00:00.000Z', -2.25],
+                 ['2026-09-09T12:00:00.000Z', -0.1]];
+  const sum = moves.reduce((t, m) => t + m[1], 0);
+  check('every event is accounted for, and no more than every event',
+    Math.abs((live[1] - bal[0][1]) - sum) < 1e-6, `${(live[1] - bal[0][1]).toFixed(6)} vs ${sum.toFixed(6)}`);
+  check('a deposit steps the line by what was deposited',
+    bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] - 23.24) < 1e-6),
+    JSON.stringify(bal.map(p => p[1])));
+  check('a fill steps it by the fill, net of its fee',
+    bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] - 3.5) < 1e-6));
+  check('a send out steps it down',
+    bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] + 0.1) < 1e-6));
+  check('a kind of ledger row it does not understand is left out rather than guessed at',
+    !bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] - 5) < 1e-6),
+    JSON.stringify(bal.map(p => p[1])));
+  check('the points are in order', bal.every((p, i) => !i || p[0] >= bal[i - 1][0]));
+
+  // it is a one-off: later polls must not walk it back a second time
+  const n = (await lq()).bal.length;
+  await page.waitForTimeout(7000);
+  check('later polls do not reconstruct it again', (await lq()).bal.length <= n + 2,
+    `${n} -> ${(await lq()).bal.length}`);
+
+  check('the note says which stretch was reconstructed',
+    /reconstructed/.test(await page.evaluate(() => (document.querySelector('#lqbal-note') || {}).textContent || '')),
+    await page.evaluate(() => ((document.querySelector('#lqbal-note') || {}).textContent || '').slice(0, 60)));
+  check('no page errors reconstructing the balance', errs.length === 0, errs.slice(0, 2).join(' | '));
+  await page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -2377,6 +2454,7 @@ async function calendarImage(browser) {
       ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
       ['prediction markets', predictionMarkets],
       ['wallet balance', walletBalance],
+      ['balance backfill', balanceBackfill],
       ['calendar image', calendarImage],
       ['liquid naming', liquidNaming],
       ['chart under polling', chartUnderPolling],

@@ -1189,9 +1189,7 @@ body:not([data-venue="liquid"]) #lqbal-card { display: none; }
             <div class="chart-meta" id="lqbal-meta"></div></div>
           <div class="chart-wrap" style="height:200px"><canvas id="lqbal"></canvas>
             <div class="chart-empty hidden" id="lqbal-empty"></div></div>
-          <div class="chart-hint" style="padding:0 16px 12px">Sampled from the account as the page reads it.
-            The venue reports what the balance is now, never what it was, so this begins when you start
-            watching and is not a record of anything before that.</div>
+          <div class="chart-hint" style="padding:0 16px 12px" id="lqbal-note"></div>
         </section>
         <section class="kpis" id="kpis"></section>
         <div class="kpi-note dim" id="kpi-note"></div>
@@ -2401,7 +2399,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.13.0';
+  const APP_VERSION = 'v9.14.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2698,6 +2696,14 @@ if (typeof module !== 'undefined') module.exports = AN;
     $('#lqbal-meta').innerHTML = now == null ? ''
       : `<span class="big num">${moneyIn(now, 'USD')}</span>`
         + (move == null || bal.length < 2 ? '' : `<span class="range ${cls(move)}">${signed(move)} since ${fdate(new Date(bal[0][0]).toISOString().slice(0, 10), false)}</span>`);
+    const note = $('#lqbal-note');
+    if (note) note.textContent = S.lq && S.lq.backfilled && bal.length
+      ? 'Sampled from the account as the page reads it. Before it started watching the line is'
+        + ' reconstructed by walking every fill and transfer backwards from the first real reading,'
+        + ' so that stretch moves when something settles rather than while a position breathes.'
+        + ' Funding is not included in it.'
+      : 'Sampled from the account as the page reads it. The venue reports what the balance is now,'
+        + ' never what it was, so this begins when you start watching.';
     const empty = $('#lqbal-empty');
     if (bal.length < 2 || typeof Chart === 'undefined') {
       empty.classList.remove('hidden');
@@ -6009,8 +6015,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     const rows = Array.isArray(j.rows) ? j.rows
       : (j.history && Array.isArray(j.history.rows) ? j.history.rows : null);
     const account = j.account || (j.portfolio && j.portfolio.account) || null;
+    // money in and out, when the source keeps it apart from the fills
+    const transfers = Array.isArray(j.transfers) ? j.transfers
+      : (j.history && Array.isArray(j.history.transfers) ? j.history.transfers : null);
     if (!positions && !rows) throw new Error('No positions and no rows in there. Paste the portfolio blob or the history blob.');
-    return { positions, rows, account };
+    return { positions, rows, account, transfers };
   }
 
   // One merge, whether the JSON was pasted or fetched. Positions replace; fills are added only if
@@ -6040,6 +6049,56 @@ if (typeof module !== 'undefined') module.exports = AN;
     }
   }
 
+  // Money in and out. The venue names these four ways and only the sign matters here; anything
+  // else it might report is left alone rather than guessed at.
+  const LQ_IN = /^(deposit|receive|transfer in|internal ?transfer in)$/i;
+  const LQ_OUT = /^(withdraw|withdrawal|send|transfer out)$/i;
+  function lqTransfers(rows) {
+    const out = [];
+    for (const r of rows || []) {
+      const kind = String((r && r.type) || (r && r.delta && r.delta.type) || '');
+      const dir = LQ_IN.test(kind) ? 1 : LQ_OUT.test(kind) ? -1 : 0;
+      if (!dir) continue;
+      const amt = lqNum(r.value != null ? r.value : (r.delta && (r.delta.usdc != null ? r.delta.usdc : r.delta.amount)));
+      const ts = Number(r.timeMs != null ? r.timeMs : Date.parse(r.time));
+      if (amt == null || !lqSane(amt) || amt <= 0 || !isFinite(ts)) continue;
+      out.push({ ts, amt: dir * amt });
+    }
+    return out;
+  }
+
+  // The balance before sampling began is not lost, it is just not written down: every fill and
+  // every transfer is a known change to it, so walking those backwards from a balance you have
+  // observed reconstructs the ones you have not. The anchor is the earliest real reading, so the
+  // reconstruction meets the samples exactly where they start rather than stepping at the join.
+  //
+  // What this cannot recover is unrealised P&L between events — nothing recorded it — so the
+  // reconstructed stretch is a closed-equity line: it moves when something settles, not while a
+  // position breathes. Funding is left out too, which makes it drift slowly on a perps account.
+  function backfillBalance(records, transfers) {
+    const bal = S.lq.bal;
+    if (!Array.isArray(bal) || !bal.length) return;
+    const anchorTs = bal[0][0], anchorVal = bal[0][1];
+    const events = [];
+    for (const r of records || []) {
+      const ts = Date.parse(r.closeTs);
+      if (isFinite(ts) && ts < anchorTs && isFinite(r.pnl)) events.push({ ts, amt: r.pnl });
+    }
+    for (const t of transfers || []) if (t.ts < anchorTs) events.push(t);
+    if (!events.length) return;
+    events.sort((a, b) => b.ts - a.ts);                 // newest first, to walk backwards
+    let v = anchorVal;
+    const out = [];
+    for (const e of events) {
+      out.push([e.ts, lqTrim(v)]);                      // the balance immediately after this event
+      v -= e.amt;
+    }
+    out.push([events[events.length - 1].ts - 1000, lqTrim(v)]);
+    out.reverse();
+    S.lq.bal = out.concat(bal);
+    S.lq.backfilled = true;
+  }
+
   function applyLiquid(parsed) {
     S.lq = S.lq || emptyLq();
     if (parsed.positions) {
@@ -6047,6 +6106,12 @@ if (typeof module !== 'undefined') module.exports = AN;
       S.lq.account = parsed.account || S.lq.account;
     }
     recordBalance(parsed.account || S.lq.account);
+    // Once, when there is both something to anchor on and something to walk back through. The
+    // transfers may arrive on their own key or mixed into the history, depending on the source.
+    if (!S.lq.backfilled && parsed.rows) {
+      const moves = lqTransfers(parsed.transfers || parsed.rows);
+      if (moves.length) backfillBalance(liquidRecords(parsed.rows), moves);
+    }
     let added = 0;
     if (parsed.rows) {
       const at = new Map(S.trades.map((t, i) => [t.reference, i]));
@@ -6106,9 +6171,13 @@ if (typeof module !== 'undefined') module.exports = AN;
   }
   async function fetchHyperliquid(user, dex) {
     const withDex = o => (dex ? { ...o, dex } : o);
-    const [st, fills] = await Promise.all([
+    const [st, fills, ledger] = await Promise.all([
       hlPost(withDex({ type: 'clearinghouseState', user })),
       hlPost(withDex({ type: 'userFills', user })),
+      // Money in and out, for reconstructing the balance before this page was watching. Unlike the
+      // two above, this shape has not been read from the live endpoint — so it is attempted, and a
+      // refusal or anything that does not look like it costs nothing but the backfill.
+      hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null),
     ]);
     const ms = (st && st.marginSummary) || {};
     const account = { equity: ms.accountValue ?? null, account_value: ms.accountValue ?? null,
@@ -6147,7 +6216,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         txHash: f.hash || '',
       });
     }
-    return { account, positions, rows };
+    return { account, positions, rows, transfers: Array.isArray(ledger) ? ledger : [] };
   }
   async function syncLiquid(silent) {
     const cfg = S.settings;

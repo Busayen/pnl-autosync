@@ -187,8 +187,18 @@ The venue answers with what the balance is now and never with what it was, so th
 exists is the one this page keeps. **Overview** on the Liquid book carries a balance line, sampled
 from the account as it is read, with what is in margin against what is free.
 
-It begins when you start watching. It is not a record of anything before that, and it does not
-backfill — a book restored from a backup starts its line again from the first reading after.
+Before it started watching, the line is reconstructed rather than absent. Every fill and every
+transfer is a known change to the balance, so walking those backwards from the first real reading
+rebuilds the readings that were never taken. The anchor is that first reading, so the reconstructed
+stretch meets the sampled one exactly instead of stepping at the join.
+
+Two things the reconstructed stretch is not. It moves when something settles, not while a position
+breathes — nothing recorded the unrealised swing between events, so it is a closed-equity line, and
+the drawdown inside a trade is invisible in it. And it leaves funding out, which makes it drift
+slowly on a perpetuals account. The sampled stretch has neither problem, which is why sampling
+continues rather than being replaced.
+
+A ledger row of a kind it does not recognise is left out rather than guessed at.
 
 Sampling is deliberately sparse: roughly one point every five minutes, because a fifteen-second
 poll would be 5,760 a day and browser storage is not large. A jump is kept whatever the clock says,
