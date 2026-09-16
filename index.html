@@ -2378,7 +2378,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.9.0';
+  const APP_VERSION = 'v9.10.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6671,113 +6671,166 @@ if (typeof module !== 'undefined') module.exports = AN;
     toast('Saved ' + filename);
   }
 
-  // html2canvas (1.4.1) predates CSS Color 4. Chrome resolves color-mix() to color(srgb ...),
-  // which makes it throw. Rather than patch elements one by one — which misses pseudo-elements
-  // and relies on the clone having the same node list — rewrite the stylesheet itself: every
-  // color-mix() expression is resolved to a concrete rgba() by asking the browser for it.
-  function toLegacyColor(v) {
-    return String(v).replace(/color\(\s*(?:srgb|display-p3|srgb-linear)\s+([-\d.eE]+)\s+([-\d.eE]+)\s+([-\d.eE]+)(?:\s*\/\s*([-\d.eE]+%?))?\s*\)/g,
-      (_, r, g, b, a) => {
-        const to255 = x => Math.max(0, Math.min(255, Math.round(parseFloat(x) * 255)));
-        let alpha = a == null ? 1 : (String(a).endsWith('%') ? parseFloat(a) / 100 : parseFloat(a));
-        if (!isFinite(alpha)) alpha = 1;
-        return `rgba(${to255(r)}, ${to255(g)}, ${to255(b)}, ${alpha})`;
-      });
+  // ---- the shared image ----
+  // Capturing the calendar off the page meant capturing whatever layout the window happened to
+  // have: a phone produced a phone-shaped picture, a laptop a wider one, and neither matched the
+  // other. So the picture is not the page. It is built here at a fixed width, off-screen, from
+  // the same data — one size, one design, wherever it is exported from.
+  //
+  // It is also built out of what html2canvas is good at: inline-block boxes with explicit pixel
+  // sizes, literal rgb() colours, no shadows, no grid, no colour functions to talk it out of
+  // afterwards. The workarounds the old path needed were all for things it should not have been
+  // asked to draw in the first place.
+  // Seven cells and six gaps have to land exactly on the inner width, so the inner width is
+  // derived once — padding on both sides and the border, which is the 2px that had it wrapping to
+  // six columns — rather than worked out by hand in each place that needs it.
+  const CARD_W = 880, CELL = 110, CELL_H = 84, GAP = 9, PAD = 28;
+  const INNER = CARD_W - PAD * 2;                     // 824 = 7 * (110 + 9) - 9
+  // One palette, fixed. The picture leaves the app and lands somewhere with its own background,
+  // so it carries its own rather than inheriting a theme that may not survive the journey. Profit
+  // and loss are the exception: those are yours, from Settings.
+  const SHOT = { bg: '#0f1116', panel: '#171a21', line: '#252936',
+                 text: '#e9edf5', dim: '#79839a', faint: '#4a5364', best: '212 167 44' };
+
+  function shotRgb(v, alpha) {
+    const parts = String(v || '').trim().replace(/[/,]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 3);
+    return parts.length === 3 ? `rgba(${parts.join(',')},${alpha})` : `rgba(128,128,128,${alpha})`;
   }
-  // Ask the live document to evaluate a colour expression, so var() and theme resolve correctly.
-  function resolveColorExpr(expr, probe) {
-    try {
-      probe.style.color = '';
-      probe.style.color = expr;
-      const out = getComputedStyle(probe).color;
-      if (!out || out.indexOf('color-mix') !== -1) return null;
-      return toLegacyColor(out);
-    } catch { return null; }
+
+  // Longest run of consecutive days that made money. "Current" is the run the month ends on, which
+  // is only a streak if the last day with any trading on it was a winning one.
+  function shotStreaks(days, mk) {
+    const keys = [...days.keys()].filter(k => k.startsWith(mk)).sort();
+    let best = 0, run = 0, cur = 0;
+    for (const k of keys) {
+      const d = days.get(k);
+      if (d && d.pnl > 0) { run++; if (run > best) best = run; } else run = 0;
+    }
+    cur = run;                       // the run still going when the month's last active day passed
+    return { best, cur };
   }
-  // Matches color-mix(...) including one level of nested parens, e.g. var(--x).
-  const COLOR_MIX_RE = /color-mix\((?:[^()]|\([^()]*\))*\)/g;
-  function deModernizeCss(css, probe) {
-    let out = css.replace(COLOR_MIX_RE, m => resolveColorExpr(m, probe) || 'rgba(0,0,0,0)');
-    if (out.indexOf('color(') !== -1) out = toLegacyColor(out);
-    return out;
+
+  function calendarCardNode() {
+    const base = baseTrades(), days = C.byDay(base), { y, m } = S.cal;
+    const mk = `${y}-${C.pad2(m + 1)}`;
+    const monFirst = S.settings.weekStart === 'mon';
+    const order = monFirst ? [0, 1, 2, 3, 4, 5, 6] : [6, 0, 1, 2, 3, 4, 5];
+    const dim = new Date(y, m + 1, 0).getDate();
+    const lead = order.indexOf(C.weekday(C.iso(y, m + 1, 1)));
+    const weeks = Math.floor((lead + dim - 1) / 7) + 1;
+
+    let net = 0, trades = 0, won = 0, lost = 0, wins = 0, losses = 0, top = 0, topKey = null, maxAbs = 1;
+    for (const [k, d] of days) {
+      if (!k.startsWith(mk)) continue;
+      net += d.pnl; trades += d.trades; wins += d.wins; losses += d.losses;
+      if (d.pnl > 0) won += d.pnl; else lost += -d.pnl;
+      if (d.pnl > top) { top = d.pnl; topKey = k; }
+      maxAbs = Math.max(maxAbs, Math.abs(d.pnl));
+    }
+    const pRgb = cssVar('--profit-rgb'), lRgb = cssVar('--loss-rgb');
+    const profit = shotRgb(pRgb, 1), loss = shotRgb(lRgb, 1);
+    const { best, cur } = shotStreaks(days, mk);
+
+    const root = document.createElement('div');
+    root.style.cssText = `width:${CARD_W}px;box-sizing:border-box;padding:${PAD}px;background:${SHOT.bg};`
+      + `border-radius:18px;color:${SHOT.text};`
+      + `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;`
+      + `font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased`;
+
+    const swept = won + lost;
+    const wPct = swept > 0 ? Math.round(won / swept * 100) : (net >= 0 ? 100 : 0);
+    const cell = (html, extra) => `<div data-cell style="display:inline-block;vertical-align:top;width:${CELL}px;`
+      + `height:${CELL_H}px;box-sizing:border-box;border-radius:10px;margin:0 ${GAP}px ${GAP}px 0;`
+      + `${extra}">${html}</div>`;
+
+    let grid = '';
+    for (let r = 0; r < weeks; r++) {
+      for (const w of order) {
+        const n = r * 7 + order.indexOf(w) - lead + 1;
+        const k = n >= 1 && n <= dim ? C.iso(y, m + 1, n) : null;
+        if (!k) { grid += cell('', 'background:transparent'); continue; }
+        const d = days.get(k);
+        const v = d ? d.pnl : 0;
+        const ratio = Math.min(1, Math.abs(v) / maxAbs);
+        const alpha = (0.10 + 0.30 * Math.sqrt(ratio)).toFixed(3);
+        const rgb = v > 0 ? pRgb : lRgb;
+        const isTop = topKey && k === topKey && top > 0;
+        // A day that did not trade gets no box at all. Drawing one for every empty square is what
+        // made it busy: five sixths of a quiet month is grid rather than result.
+        const fill = !d || v === 0 ? 'transparent'
+          : isTop ? shotRgb(SHOT.best, 0.20) : shotRgb(rgb, alpha);
+        const ink = !d || v === 0 ? SHOT.faint : v > 0 ? profit : loss;
+        const txt = d ? signed(v) : money(0, 0);      // "$0", not "$0.00" — it is a blank, not a result
+        // a day that traded is the thing being read; one that did not should not compete with it
+        const size = !d ? 14 : txt.length > 10 ? 13 : txt.length > 8 ? 15 : 17;
+        grid += cell(
+          `<div style="padding:8px 10px 0;font-size:11px;line-height:1;color:${SHOT.dim}">${n}</div>`
+          + `<div style="padding:0 10px;margin-top:${d ? 16 : 21}px;font-size:${size}px;line-height:1.1;`
+          + `font-weight:${d ? 600 : 500};color:${ink}">${esc(txt)}</div>`
+          + (d ? `<div style="padding:0 10px;margin-top:5px;font-size:10px;line-height:1;color:${SHOT.dim}">`
+                 + `${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}</div>` : ''),
+          `background:${fill}`);
+      }
+    }
+
+    const chip = t => `<span style="display:inline-block;padding:6px 11px;margin-right:8px;`
+      + `border:1px solid ${SHOT.line};border-radius:999px;font-size:11.5px;color:${SHOT.dim}">${esc(t)}</span>`;
+
+    root.innerHTML =
+      `<div style="font-size:0;margin-bottom:18px">
+         <div style="display:inline-block;width:${INNER - 220}px;font-size:16px;font-weight:600;letter-spacing:.2px">P&amp;L Calendar</div>
+         <div style="display:inline-block;width:220px;text-align:right;font-size:14px;color:${SHOT.dim}">${MONTHS[m]} ${y}</div>
+       </div>
+       <div style="font-size:26px;font-weight:700;line-height:1.1;color:${net >= 0 ? profit : loss}">${esc(signed(net))}</div>
+       <div style="margin:11px 0 7px;height:3px;border-radius:2px;background:${loss};font-size:0">
+         <div style="height:3px;border-radius:2px;background:${profit};width:${wPct}%"></div>
+       </div>
+       <div style="font-size:0;margin-bottom:20px">
+         <div style="display:inline-block;width:50%;font-size:11.5px;color:${profit}">${wins} / ${esc(money(won))}</div>
+         <div style="display:inline-block;width:50%;text-align:right;font-size:11.5px;color:${loss}">${losses} / ${esc(money(lost))}</div>
+       </div>
+       <div style="font-size:0;margin-bottom:6px;margin-right:-${GAP}px">${order.map(w =>
+         `<div style="display:inline-block;width:${CELL}px;margin-right:${GAP}px;text-align:center;`
+         + `font-size:11px;color:${SHOT.dim}">${WDNAME[w]}</div>`).join('')}</div>
+       <div style="font-size:0;margin-right:-${GAP}px">${grid}</div>
+       <div style="font-size:0;margin-top:14px">
+         <div style="display:inline-block;width:${INNER - 160}px;font-size:0">
+           ${chip(`Current positive streak: ${cur} ${cur === 1 ? 'day' : 'days'}`)}
+           ${chip(`Best in ${MONTHS[m]}: ${best} ${best === 1 ? 'day' : 'days'}`)}
+         </div>
+         <div style="display:inline-block;width:160px;text-align:right;font-size:11.5px;color:${SHOT.dim}">
+           ${trades} ${trades === 1 ? 'trade' : 'trades'} · ${wins + losses ? Math.round(wins / (wins + losses) * 100) : 0}% win
+         </div>
+       </div>`;
+    return root;
   }
+  window.__calCard = calendarCardNode;
 
   async function exportImage() {
     if (typeof html2canvas === 'undefined') { toast('Image export library failed to load.'); return; }
-    const node = $('#cal-card'); const btn = $('#btn-image'); btn.disabled = true;
-    const probe = document.createElement('span');
-    probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
-    document.body.appendChild(probe);
+    if (!S.trades.length) { toast('Nothing to picture yet.'); return; }
+    const btn = $('#btn-image'); if (btn) btn.disabled = true;
+    const node = calendarCardNode();
+    // Off-screen but laid out: it needs real geometry to be captured, and a fixed width is the
+    // whole point, so it must not be told to fit anything.
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:-20000px;top:0;width:${W}px;pointer-events:none;z-index:-1'
+      .replace('${W}', String(CARD_W));
+    host.appendChild(node);
+    document.body.appendChild(host);
     try {
       const canvas = await html2canvas(node, {
-        backgroundColor: toLegacyColor(cssVar('--card')), scale: 2, useCORS: true, logging: false,
-        ignoreElements: e => e.classList && e.classList.contains('no-export'),
-        onclone: doc => {
-          doc.querySelectorAll('style').forEach(el => {
-            const css = el.textContent || '';
-            if (css.indexOf('color-mix(') !== -1 || css.indexOf('color(') !== -1) el.textContent = deModernizeCss(css, probe);
-          });
-
-          // html2canvas has weak flexbox support and renders inset box-shadow as a filled block —
-          // that is the stray white square on today's date. Neutralise both for the capture only.
-          // <button> centres its content vertically no matter what display is set, which puts
-          // the date in the middle of empty cells. Swap them for divs in the clone.
-          doc.querySelectorAll('button.day').forEach(btn => {
-            const div = doc.createElement('div');
-            div.className = btn.className;
-            if (btn.getAttribute('style')) div.setAttribute('style', btn.getAttribute('style'));
-            div.innerHTML = btn.innerHTML;
-            btn.replaceWith(div);
-          });
-          const fix = doc.createElement('style');
-          fix.textContent = `
-            /* Two separate html2canvas limits: it renders box-shadows as hard rectangles (the
-               black frames round the week cells) and it mislays absolutely positioned children
-               inside a centred flex parent. So: strip shadows, and put the date and marks back
-               into normal flow, pulling the marks up onto the date's line. */
-            #cal-card * { box-shadow: none !important; text-shadow: none !important; }
-            /* The canvas is rectangular but the card is rounded, so html2canvas fills the corners
-               with a flat colour that does not match the card's gradient — the dark frame round
-               the edges. Square the card off for the capture so its own background covers the
-               whole canvas. */
-            #cal-card { border-radius: 0 !important; border: 0 !important; }
-            .day { display: block !important; }
-            .day .d { position: static !important; display: block !important; text-align: left; }
-            .day .dots { position: static !important; text-align: right; white-space: nowrap;
-                         margin-top: -1.15em; margin-bottom: 2px; max-width: 100%; }
-            .day .dots i { display: inline-block !important; margin-left: 3px; }
-            .day .dbar { position: static !important; width: 38%; margin: -0.9em 0 3px auto; }
-            /* keep the same dots-vs-bar split the live page uses at this width */
-            @media (min-width: 561px) { .day .dots { display: block !important; } .day .dbar { display: none !important; } }
-            @media (max-width: 560px) { .day .dots { display: none !important; } .day .dbar { display: block !important; } }
-            .day.has > span:last-child { display: block !important; text-align: center; margin-top: 1px; }
-            .day.has::after { display: none !important; }
-            .wk { display: block !important; }
-            .wk > span { display: block; }
-            .wk .s { display: block !important; }
-            .wk .s > span { display: block; }
-            .wk .wbar { display: block; }
-            /* No "today" or "selected" marker belongs in an exported image. */
-            .day.today, .day.selected { border: 1px solid var(--border) !important; }
-            .day.today.p, .day.selected.p { border-color: rgb(var(--profit-text-rgb) / .35) !important; }
-            .day.today.l, .day.selected.l { border-color: rgb(var(--loss-text-rgb) / .35) !important; }
-            .day .v, .day .vs, .day .c, .wk .n, .wk .ns { overflow: visible !important; }
-          `;
-          doc.head.appendChild(fix);
-          // inline styles set by the app (calendar heat shading) can carry modern colours too
-          doc.querySelectorAll('[style]').forEach(el => {
-            const v = el.getAttribute('style') || '';
-            if (v.indexOf('color-mix(') !== -1 || v.indexOf('color(') !== -1) el.setAttribute('style', deModernizeCss(v, probe));
-          });
-        },
+        backgroundColor: SHOT.bg, scale: 2, useCORS: true, logging: false,
+        width: CARD_W, windowWidth: CARD_W + 80,
       });
-      await deliverImage(canvas, 'pnl-calendar.png');
+      await deliverImage(canvas, `pnl-calendar-${S.cal.y}-${C.pad2(S.cal.m + 1)}.png`);
     } catch (e) {
       toast(`Could not render the image: ${String(e && e.message || e)}`, 8000);
     }
-    probe.remove();
-    btn.disabled = false;
+    host.remove();
+    if (btn) btn.disabled = false;
   }
+
   // Never let sync credentials leave the browser inside a shared file. The token grants access
   // to the worker, and therefore to the IG account behind it.
   const safeSettings = () => { const { syncUrl, syncToken, closeToken, orderToken, liquidUrl, liquidToken, liquidAddress, ...rest } = S.settings || {}; return rest; };

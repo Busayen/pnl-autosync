@@ -157,6 +157,28 @@ counts as a loss the size of its fee — which is how a profitable day reads as 
 Positions are a mirror of what Liquid shows. Nothing in this app can open, close or change one —
 those live on Liquid.
 
+### Sharing the calendar
+
+The image button produces the same picture wherever it is pressed. It used to capture the calendar
+off the page, which meant capturing whatever layout the window happened to have — a phone made a
+phone-shaped one, a laptop a wider one, and neither matched the other.
+
+It is no longer the page. It is built separately at a fixed **880px** wide, off-screen, from the same
+data, and rendered at 2× — so the file is 1760px across whether it came from a phone, a laptop or a
+tablet. Only the height moves, with the number of weeks in the month.
+
+It carries its own palette rather than the app's theme, because it lands somewhere with its own
+background and a light-theme picture on a dark timeline reads as a mistake. Profit and loss are the
+exception: those are yours, from Settings, so the picture agrees with the dashboard it came from.
+
+Days that did not trade get no box, only a faint `$0`. Drawing one for every empty square is what
+made it busy — most of a quiet month is grid rather than result. The month's best day is marked in
+gold, and the footer carries the streaks.
+
+One caveat worth stating: the layout, the size and the content are identical across devices, but the
+exact antialiasing of the glyphs is the browser's business and can differ slightly. The picture is
+the same; the pixels are not guaranteed bit-for-bit.
+
 ### Wallet balance
 
 The venue answers with what the balance is now and never with what it was, so the only history that

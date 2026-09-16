@@ -2303,6 +2303,56 @@ async function walletBalance(browser) {
   await page.context().close();
 }
 
+// The picture used to be the page, so a phone made a phone-shaped one. It is built at a fixed
+// width now, from the same data, which is only worth anything if the phone and the desktop
+// produce the identical thing.
+async function calendarImage(browser) {
+  state = { orders: [], positions: [] };
+  const card = async (page) => page.evaluate(() => {
+    const n = window.__calCard();
+    n.style.position = 'fixed'; n.style.left = '-20000px'; n.style.top = '0';
+    document.body.appendChild(n);
+    const r = n.getBoundingClientRect();
+    const cells = n.querySelectorAll('[data-cell]');
+    const out = { w: Math.round(r.width), h: Math.round(r.height), text: n.innerText.replace(/\s+/g, ' ').trim(),
+                  cells: cells.length, cellW: cells.length ? Math.round(cells[0].getBoundingClientRect().width) : 0,
+                  modern: /color-mix|oklch|color\(/.test(n.innerHTML) };
+    n.remove();
+    return out;
+  });
+
+  const wide = await openPage(browser, { width: 1400, height: 900 });
+  const a = await card(wide.page);
+  check('the card is built at a fixed width', a.w === 880, String(a.w));
+  check('with a cell for every square of the month', a.cells >= 35, String(a.cells));
+  check('each one a fixed size too', a.cellW === 110, String(a.cellW));
+  check('it names the month', /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/.test(a.text), a.text.slice(0, 80));
+  check('and carries a net figure', /[+-]?[$£€]/.test(a.text), a.text.slice(0, 80));
+  check('and the streaks', /streak/i.test(a.text), a.text.slice(0, 200));
+  // html2canvas 1.4.1 predates CSS Color 4 and throws on what the app's own theme is written in
+  check('nothing in it is written in a colour function the renderer cannot read', !a.modern);
+  check('no page errors building it', wide.errs.length === 0, wide.errs.slice(0, 2).join(' | '));
+  await wide.page.context().close();
+
+  const phone = await openPage(browser, { width: 390, height: 844 }, true);
+  const b = await card(phone.page);
+  check('a phone builds the same width', b.w === a.w, `${a.w} vs ${b.w}`);
+  check('the same height', b.h === a.h, `${a.h} vs ${b.h}`);
+  check('the same cells, the same size', b.cells === a.cells && b.cellW === a.cellW,
+    `${a.cells}/${a.cellW} vs ${b.cells}/${b.cellW}`);
+  check('and reads identically', b.text === a.text,
+    `${a.text.slice(0, 60)} | ${b.text.slice(0, 60)}`);
+  check('no page errors on a phone', phone.errs.length === 0, phone.errs.slice(0, 2).join(' | '));
+  await phone.page.context().close();
+
+  // narrower than the card itself: the window must not be allowed to squeeze it
+  const tiny = await openPage(browser, { width: 320, height: 700 }, true);
+  const c = await card(tiny.page);
+  check('a window narrower than the card does not squeeze it', c.w === a.w && c.cellW === a.cellW,
+    `${c.w}/${c.cellW}`);
+  await tiny.page.context().close();
+}
+
 // ---------------------------------------------------------------------- main
 (async () => {
   if (!fs.existsSync(FILE)) { console.error(`not found: ${FILE}`); process.exit(2); }
@@ -2327,6 +2377,7 @@ async function walletBalance(browser) {
       ['liquid reversals', liquidReversals], ['liquid twin repair', liquidTwinRepair],
       ['prediction markets', predictionMarkets],
       ['wallet balance', walletBalance],
+      ['calendar image', calendarImage],
       ['liquid naming', liquidNaming],
       ['chart under polling', chartUnderPolling],
       ['venue isolation', venueIsolation], ['stops across venues', stopsAcrossVenues],
