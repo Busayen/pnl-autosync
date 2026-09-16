@@ -175,7 +175,10 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
 /* the month's best day, said in the figure as well as the fill */
 .day.best .v, .day.best .vs { color: #d9ad33; }
 .day .mid { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
-.day .foot { text-align: center; }
+/* Present in every cell, holding a blank where there is no count, so the figure lands on the same
+   line right across the row. A reserved min-height was a guess at the count's own height and was
+   five pixels short of it. */
+.day .foot { display: block; text-align: center; }
 .day .v.zero, .day .vs.zero { color: var(--text-3); opacity: .5; font-weight: 500; }
 /* Today is a marker, not an alert. At 1.5px of full-strength text on a day that has not traded
    it read as something being wrong with the cell. */
@@ -749,7 +752,9 @@ body { background-image: radial-gradient(1100px 420px at 50% -120px, rgb(var(--p
 .day.pad { background: transparent; border-color: transparent; }
 .day .d { position: absolute; top: 8px; left: 10px; color: var(--text-3); font-weight: 500; }
 .day.has .d { color: color-mix(in srgb, var(--text) 82%, var(--text-2)); font-weight: 600; }
-.day.has > span:last-child { display: flex; flex-direction: column; align-items: center; text-align: center; margin-top: 8px; }
+/* The last span used to be the wrapper round the value and the count, and this centred it. That
+   job belongs to .mid and .foot now, and because the selector carried .has it only applied to days
+   that traded — which is what left every zero sitting 4px below the row it belongs to. */
 .day .v { font-size: 26px; letter-spacing: -0.035em; line-height: 1.1; }
 .day .vs { font-size: 15px; }
 .day .c { font-size: 12px; color: color-mix(in srgb, var(--text) 60%, transparent); font-weight: 500; margin-top: 2px; }
@@ -2387,7 +2392,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.12.0';
+  const APP_VERSION = 'v9.12.1';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2916,7 +2921,7 @@ if (typeof module !== 'undefined') module.exports = AN;
           <span class="mid">${d
             ? `<span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span>`
             : `<span class="v num zero">${money(0, 0)}</span><span class="vs num zero">${money(0, 0)}</span>`}</span>
-          ${d ? `<span class="foot"><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
+          <span class="foot"><span class="c">${d ? plural(d.trades, 'trade') : '&nbsp;'}</span></span></button>`;
       }
       // the week total always covers all seven days, whether or not weekends are shown
       let n = 0, tr = 0, wn = 0, l = 0, any = false;
@@ -6792,10 +6797,13 @@ if (typeof module !== 'undefined') module.exports = AN;
         // renderer this ends up in cannot be trusted with.
         grid += cell(
           `<div style="padding:8px 10px 0;font-size:11px;line-height:1;color:${SHOT.dim}">${n}</div>`
-          + `<div style="padding:0 6px;margin-top:${d ? 24 : 35}px;text-align:center;font-size:${size}px;`
+          + `<div style="padding:0 6px;margin-top:24px;text-align:center;font-size:${size}px;`
           + `line-height:1.1;font-weight:${d ? 600 : 500};color:${ink}">${esc(txt)}</div>`
-          + (d ? `<div style="padding:0 6px;margin-top:24px;text-align:center;font-size:10px;line-height:1;`
-                 + `color:${SHOT.dim}">${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}</div>` : ''),
+          // The count's line is reserved whether or not there is a count, so the figure sits at the
+          // same height in every cell. Only the cells that traded used to hold this space, which
+          // dropped every zero a few pixels below the row it belongs to.
+          + `<div style="padding:0 6px;margin-top:24px;min-height:10px;text-align:center;font-size:10px;`
+          + `line-height:1;color:${SHOT.dim}">${d ? `${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}` : ''}</div>`,
           `background:${fill}`);
       }
     }
