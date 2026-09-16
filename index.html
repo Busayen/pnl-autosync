@@ -2378,7 +2378,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.10.0';
+  const APP_VERSION = 'v9.10.1';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6740,7 +6740,7 @@ if (typeof module !== 'undefined') module.exports = AN;
     const swept = won + lost;
     const wPct = swept > 0 ? Math.round(won / swept * 100) : (net >= 0 ? 100 : 0);
     const cell = (html, extra) => `<div data-cell style="display:inline-block;vertical-align:top;width:${CELL}px;`
-      + `height:${CELL_H}px;box-sizing:border-box;border-radius:10px;margin:0 ${GAP}px ${GAP}px 0;`
+      + `height:${CELL_H}px;box-sizing:border-box;border-radius:6px;margin:0 ${GAP}px ${GAP}px 0;`
       + `${extra}">${html}</div>`;
 
     let grid = '';
@@ -6763,12 +6763,14 @@ if (typeof module !== 'undefined') module.exports = AN;
         const txt = d ? signed(v) : money(0, 0);      // "$0", not "$0.00" — it is a blank, not a result
         // a day that traded is the thing being read; one that did not should not compete with it
         const size = !d ? 14 : txt.length > 10 ? 13 : txt.length > 8 ? 15 : 17;
+        // The date stays in its corner; the result sits in the middle of the box, which is where
+        // the eye goes when it is scanning a month rather than looking up a day.
         grid += cell(
           `<div style="padding:8px 10px 0;font-size:11px;line-height:1;color:${SHOT.dim}">${n}</div>`
-          + `<div style="padding:0 10px;margin-top:${d ? 16 : 21}px;font-size:${size}px;line-height:1.1;`
-          + `font-weight:${d ? 600 : 500};color:${ink}">${esc(txt)}</div>`
-          + (d ? `<div style="padding:0 10px;margin-top:5px;font-size:10px;line-height:1;color:${SHOT.dim}">`
-                 + `${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}</div>` : ''),
+          + `<div style="padding:0 6px;margin-top:${d ? 14 : 22}px;text-align:center;font-size:${size}px;`
+          + `line-height:1.1;font-weight:${d ? 600 : 500};color:${ink}">${esc(txt)}</div>`
+          + (d ? `<div style="padding:0 6px;margin-top:5px;text-align:center;font-size:10px;line-height:1;`
+                 + `color:${SHOT.dim}">${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}</div>` : ''),
           `background:${fill}`);
       }
     }
