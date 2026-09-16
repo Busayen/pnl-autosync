@@ -155,9 +155,18 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
 .cal-nav { display: flex; align-items: center; gap: 6px; }
 .cal-month { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; min-width: 132px; text-align: center; }
 .cal-tools { display: flex; align-items: center; gap: 8px; }
-.cal-month-sum { display: flex; gap: 18px; align-items: baseline; margin-right: 6px; }
-.cal-month-sum .v { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
-.cal-month-sum .k { font-size: 11.5px; color: var(--text-3); }
+.cal-top { padding: 0 20px 18px; }
+.cal-month-sum .v { display: block; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.cal-month-sum .split { display: flex; height: 3px; border-radius: 2px; overflow: hidden; margin: 11px 0 7px;
+  background: var(--loss); }
+.cal-month-sum .split i { display: block; height: 100%; background: var(--profit); }
+.cal-month-sum .ends { display: flex; justify-content: space-between; font-size: 11.5px; }
+.cal-month-sum .ends .won { color: var(--profit); } .cal-month-sum .ends .lost { color: var(--loss); }
+.cal-month-sum .top { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+/* The id outranks the pill treatment this inherits elsewhere: beside a 26px figure it should read
+   as a caption, not as a badge. */
+#cal-sum .k { font-size: 11.5px; color: var(--text-3); background: none; border: 0; padding: 0; border-radius: 0; }
+@media (max-width: 560px) { .cal-top { padding: 0 12px 14px; } .cal-month-sum .v { font-size: 21px; } }
 .cal { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) 156px; gap: 5px; }
 .cal .dow { font-size: 11px; color: var(--text-3); font-weight: 500; text-align: center; padding: 2px 0 6px; }
 .cal .dow.week { text-align: left; padding-left: 12px; }
@@ -758,9 +767,8 @@ body { background-image: radial-gradient(1100px 420px at 50% -120px, rgb(var(--p
 .day .v { font-size: 26px; letter-spacing: -0.035em; line-height: 1.1; }
 .day .vs { font-size: 15px; }
 .day .c { font-size: 12px; color: color-mix(in srgb, var(--text) 60%, transparent); font-weight: 500; margin-top: 2px; }
-.day.p { border-color: rgb(var(--profit-text-rgb) / .35); } .day.l { border-color: rgb(var(--loss-text-rgb) / .35); }
-.day.has::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(160deg, rgba(255,255,255,.07), transparent 55%); }
-[data-theme="light"] .day.has::after { background: linear-gradient(160deg, rgba(255,255,255,.7), transparent 55%); }
+/* A diagonal white sheen used to sit over every filled day. It made two cells of the same value
+   read as different depending on their size, which is the opposite of what a heat map is for. */
 .day.has:hover { box-shadow: 0 0 20px rgb(var(--profit-rgb) / .18); } .day.l.has:hover { box-shadow: 0 0 20px rgb(var(--loss-rgb) / .18); }
 .day .dots { position: absolute; top: 11px; right: 10px; display: flex; gap: 3px; }
 .day .dots i { width: 5px; height: 5px; border-radius: 50%; display: block; }
@@ -1195,8 +1203,9 @@ body:not([data-venue="liquid"]) #lqbal-card { display: none; }
         <section class="card" id="cal-card">
           <div class="card-head">
             <div class="cal-nav"><button class="btn icon sm no-export" data-act="prev" aria-label="Previous month"><svg class="i" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><div class="cal-month" id="cal-month"></div><button class="btn icon sm no-export" data-act="next" aria-label="Next month"><svg class="i" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button><button class="btn ghost sm no-export" data-act="today">Today</button></div>
-            <div class="cal-tools"><div class="cal-month-sum" id="cal-sum"></div><button class="btn icon sm no-export" id="btn-image" data-act="image" title="Export as image" aria-label="Export calendar as image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button></div>
+            <div class="cal-tools"><button class="btn icon sm no-export" id="btn-image" data-act="image" title="Export as image" aria-label="Export calendar as image"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg></button></div>
           </div>
+          <div class="cal-top"><div class="cal-month-sum" id="cal-sum"></div></div>
           <div class="card-body"><div class="cal" id="cal"></div><div id="cal-note"></div></div>
           <div class="legend"><span><i style="background:var(--profit-soft);border:1px solid rgb(var(--profit-rgb) / .4)"></i>Profit</span><span><i style="background:var(--loss-soft);border:1px solid rgb(var(--loss-rgb) / .4)"></i>Loss</span><span><i style="border:1px solid var(--border)"></i>No trades</span><span><i style="border:1px dashed var(--loss)"></i>Session low point</span><span style="margin-left:auto" class="no-export">Click a day for its trades · <span class="kbd">←</span> <span class="kbd">→</span> month · <span class="kbd">1</span>–<span class="kbd">6</span> sections · <span class="kbd">⌘K</span></span></div>
         </section>
@@ -2392,7 +2401,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.12.1';
+  const APP_VERSION = 'v9.13.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2905,7 +2914,20 @@ if (typeof module !== 'undefined') module.exports = AN;
     let mNet = 0, mTr = 0, mW = 0, mL = 0;
     for (const [k, d] of days) if (k.startsWith(mk)) { mNet += d.pnl; mTr += d.trades; mW += d.wins; mL += d.losses; }
     $('#cal-month').textContent = `${MONTHS[m]} ${y}`;
-    $('#cal-sum').innerHTML = mTr ? `<span class="v num ${cls(mNet)}">${signed(mNet)}</span><span class="k">${plural(mTr, 'trade')} · ${mW + mL ? Math.round(mW / (mW + mL) * 100) : 0}% win rate</span>` : `<span class="k">No trades this month</span>`;
+    // the month at the top, the way the shared picture says it: the figure, then how much of it
+    // was won against how much was lost
+    let mWon = 0, mLost = 0, mWd = 0, mLd = 0;
+    for (const [k, d] of days) if (k.startsWith(mk)) {
+      if (d.pnl > 0) { mWon += d.pnl; mWd++; } else if (d.pnl < 0) { mLost += -d.pnl; mLd++; }
+    }
+    const swept = mWon + mLost;
+    $('#cal-sum').innerHTML = mTr
+      ? `<span class="top"><span class="v num ${cls(mNet)}">${signed(mNet)}</span>`
+        + `<span class="k">${plural(mTr, 'trade')} · ${mW + mL ? Math.round(mW / (mW + mL) * 100) : 0}% win rate</span></span>`
+        + `<span class="split"><i style="width:${swept > 0 ? Math.round(mWon / swept * 100) : (mNet >= 0 ? 100 : 0)}%"></i></span>`
+        + `<span class="ends"><span class="won num">${mWd} / ${money(mWon)}</span>`
+        + `<span class="lost num">${mLd} / ${money(mLost)}</span></span>`
+      : `<span class="k">No trades this month</span>`;
     let h = visible.map(w => `<div class="dow">${WDNAME[w].slice(0, 1)}</div>`).join('') + '<div class="dow week">Week</div>';
     for (let r = 0; r < weeks; r++) {
       for (const w of visible) {
@@ -6744,10 +6766,13 @@ if (typeof module !== 'undefined') module.exports = AN;
     const weeks = Math.floor((lead + dim - 1) / 7) + 1;
 
     let net = 0, trades = 0, won = 0, lost = 0, wins = 0, losses = 0, top = 0, topKey = null, maxAbs = 1;
+    let wonDays = 0, lostDays = 0;
     for (const [k, d] of days) {
       if (!k.startsWith(mk)) continue;
       net += d.pnl; trades += d.trades; wins += d.wins; losses += d.losses;
-      if (d.pnl > 0) won += d.pnl; else lost += -d.pnl;
+      // days, not trades: the figure beside it is a sum of days, and pairing a count of one with a
+      // sum of the other reads as a contradiction
+      if (d.pnl > 0) { won += d.pnl; wonDays++; } else if (d.pnl < 0) { lost += -d.pnl; lostDays++; }
       if (d.pnl > top) { top = d.pnl; topKey = k; }
       maxAbs = Math.max(maxAbs, Math.abs(d.pnl));
     }
@@ -6821,8 +6846,8 @@ if (typeof module !== 'undefined') module.exports = AN;
          <div style="height:3px;border-radius:2px;background:${profit};width:${wPct}%"></div>
        </div>
        <div style="font-size:0;margin-bottom:20px">
-         <div style="display:inline-block;width:50%;font-size:11.5px;color:${profit}">${wins} / ${esc(money(won))}</div>
-         <div style="display:inline-block;width:50%;text-align:right;font-size:11.5px;color:${loss}">${losses} / ${esc(money(lost))}</div>
+         <div style="display:inline-block;width:50%;font-size:11.5px;color:${profit}">${wonDays} / ${esc(money(won))}</div>
+         <div style="display:inline-block;width:50%;text-align:right;font-size:11.5px;color:${loss}">${lostDays} / ${esc(money(lost))}</div>
        </div>
        <div style="font-size:0;margin-bottom:6px;margin-right:-${GAP}px">${order.map(w =>
          `<div style="display:inline-block;width:${CELL}px;margin-right:${GAP}px;text-align:center;`
