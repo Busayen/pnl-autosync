@@ -2325,7 +2325,7 @@ async function calendarImage(browser) {
   const a = await card(wide.page);
   check('the card is built at a fixed width', a.w === 880, String(a.w));
   check('with a cell for every square of the month', a.cells >= 35, String(a.cells));
-  check('each one a fixed size too', a.cellW === 110, String(a.cellW));
+  check('each one a fixed size too', a.cellW === 112, String(a.cellW));
   check('it names the month', /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/.test(a.text), a.text.slice(0, 80));
   check('and carries a net figure', /[+-]?[$£€]/.test(a.text), a.text.slice(0, 80));
   check('and the streaks', /streak/i.test(a.text), a.text.slice(0, 200));

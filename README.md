@@ -171,9 +171,11 @@ It carries its own palette rather than the app's theme, because it lands somewhe
 background and a light-theme picture on a dark timeline reads as a mistake. Profit and loss are the
 exception: those are yours, from Settings, so the picture agrees with the dashboard it came from.
 
-Days that did not trade get no box, only a faint `$0`. Drawing one for every empty square is what
-made it busy — most of a quiet month is grid rather than result. The month's best day is marked in
-gold, and the footer carries the streaks.
+A day that passed without trading gets no box, only a faint `$0` — drawing one for every empty
+square is what made it busy, since most of a quiet month is grid rather than result. A day that has
+not arrived gets nothing at all: it is not a day without trades, it is not a day yet, so the back of
+the current month stays empty rather than filling with zeroes that have not happened. The month's
+best day is marked in gold, figure included, and the footer carries the streaks.
 
 One caveat worth stating: the layout, the size and the content are identical across devices, but the
 exact antialiasing of the glyphs is the browser's business and can differ slightly. The picture is

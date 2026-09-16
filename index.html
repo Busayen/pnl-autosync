@@ -2378,7 +2378,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.10.1';
+  const APP_VERSION = 'v9.11.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6684,8 +6684,8 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Seven cells and six gaps have to land exactly on the inner width, so the inner width is
   // derived once — padding on both sides and the border, which is the 2px that had it wrapping to
   // six columns — rather than worked out by hand in each place that needs it.
-  const CARD_W = 880, CELL = 110, CELL_H = 84, GAP = 9, PAD = 28;
-  const INNER = CARD_W - PAD * 2;                     // 824 = 7 * (110 + 9) - 9
+  const CARD_W = 880, CELL = 112, CELL_H = 104, GAP = 5, PAD = 33;
+  const INNER = CARD_W - PAD * 2;                     // 814 = 7 * (112 + 5) - 5
   // One palette, fixed. The picture leaves the app and lands somewhere with its own background,
   // so it carries its own rather than inheriting a theme that may not survive the journey. Profit
   // and loss are the exception: those are yours, from Settings.
@@ -6754,22 +6754,28 @@ if (typeof module !== 'undefined') module.exports = AN;
         const ratio = Math.min(1, Math.abs(v) / maxAbs);
         const alpha = (0.10 + 0.30 * Math.sqrt(ratio)).toFixed(3);
         const rgb = v > 0 ? pRgb : lRgb;
+        // A day that has not arrived is not a day without trades — it is not a day yet. It gets
+        // nothing at all, which is what leaves the back of the current month empty rather than
+        // filled with zeroes that have not happened.
+        if (k > today) { grid += cell('', 'background:transparent'); continue; }
         const isTop = topKey && k === topKey && top > 0;
-        // A day that did not trade gets no box at all. Drawing one for every empty square is what
-        // made it busy: five sixths of a quiet month is grid rather than result.
+        // A day that passed without trading gets no box either, only its zero. Drawing one for
+        // every empty square is what made it busy.
         const fill = !d || v === 0 ? 'transparent'
           : isTop ? shotRgb(SHOT.best, 0.20) : shotRgb(rgb, alpha);
-        const ink = !d || v === 0 ? SHOT.faint : v > 0 ? profit : loss;
+        const ink = !d || v === 0 ? SHOT.faint
+          : isTop ? shotRgb(SHOT.best, 1) : v > 0 ? profit : loss;
         const txt = d ? signed(v) : money(0, 0);      // "$0", not "$0.00" — it is a blank, not a result
         // a day that traded is the thing being read; one that did not should not compete with it
         const size = !d ? 14 : txt.length > 10 ? 13 : txt.length > 8 ? 15 : 17;
-        // The date stays in its corner; the result sits in the middle of the box, which is where
-        // the eye goes when it is scanning a month rather than looking up a day.
+        // The date sits in its corner, the result in the middle, the count of trades pinned to the
+        // bottom. Worked out in pixels rather than asked of flexbox, which is the one thing the
+        // renderer this ends up in cannot be trusted with.
         grid += cell(
           `<div style="padding:8px 10px 0;font-size:11px;line-height:1;color:${SHOT.dim}">${n}</div>`
-          + `<div style="padding:0 6px;margin-top:${d ? 14 : 22}px;text-align:center;font-size:${size}px;`
+          + `<div style="padding:0 6px;margin-top:${d ? 24 : 35}px;text-align:center;font-size:${size}px;`
           + `line-height:1.1;font-weight:${d ? 600 : 500};color:${ink}">${esc(txt)}</div>`
-          + (d ? `<div style="padding:0 6px;margin-top:5px;text-align:center;font-size:10px;line-height:1;`
+          + (d ? `<div style="padding:0 6px;margin-top:24px;text-align:center;font-size:10px;line-height:1;`
                  + `color:${SHOT.dim}">${d.trades} ${d.trades === 1 ? 'trade' : 'trades'}</div>` : ''),
           `background:${fill}`);
       }
@@ -6793,7 +6799,7 @@ if (typeof module !== 'undefined') module.exports = AN;
        </div>
        <div style="font-size:0;margin-bottom:6px;margin-right:-${GAP}px">${order.map(w =>
          `<div style="display:inline-block;width:${CELL}px;margin-right:${GAP}px;text-align:center;`
-         + `font-size:11px;color:${SHOT.dim}">${WDNAME[w]}</div>`).join('')}</div>
+         + `font-size:11px;color:${SHOT.dim}">${WDNAME[w].slice(0, 1)}</div>`).join('')}</div>
        <div style="font-size:0;margin-right:-${GAP}px">${grid}</div>
        <div style="font-size:0;margin-top:14px">
          <div style="display:inline-block;width:${INNER - 160}px;font-size:0">
