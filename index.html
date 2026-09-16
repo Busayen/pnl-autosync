@@ -158,22 +158,31 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
 .cal-month-sum { display: flex; gap: 18px; align-items: baseline; margin-right: 6px; }
 .cal-month-sum .v { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
 .cal-month-sum .k { font-size: 11.5px; color: var(--text-3); }
-.cal { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) 156px; gap: 6px; }
+.cal { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr)) 156px; gap: 5px; }
 .cal .dow { font-size: 11px; color: var(--text-3); font-weight: 500; text-align: center; padding: 2px 0 6px; }
 .cal .dow.week { text-align: left; padding-left: 12px; }
+/* A day that traded is a filled block; one that did not is its number and a zero, with nothing
+   drawn round it. A grid of outlines for a quiet month is mostly outlines. */
 .day {
-  aspect-ratio: 1 / 0.74; border-radius: 6px; border: 1px solid var(--border); padding: 8px 9px; text-align: left;
-  display: flex; flex-direction: column; justify-content: space-between; position: relative; min-width: 0;
-  background: var(--bg-elev); color: var(--text); transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+  aspect-ratio: 1 / 0.92; border-radius: 6px; border: 0; padding: 8px 9px 7px; text-align: left;
+  display: flex; flex-direction: column; position: relative; min-width: 0;
+  background: transparent; color: var(--text); transition: transform .15s ease, box-shadow .15s ease;
 }
-[data-theme="light"] .day { background: #fff; }
-.day.pad { border-color: transparent; background: transparent; }
-.day.has { cursor: pointer; }
-.day.has:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-.day.today { box-shadow: inset 0 0 0 1.5px var(--text); }
-.day.selected { border-color: var(--text); box-shadow: 0 0 0 3px var(--ring); }
-.day.p { background: var(--profit-soft); border-color: rgb(var(--profit-rgb) / 0.25); }
-.day.l { background: var(--loss-soft); border-color: rgb(var(--loss-rgb) / 0.25); }
+.day.pad { background: transparent; }
+.day.has { background: var(--bg-elev); cursor: pointer; }
+[data-theme="light"] .day.has { background: #fff; }
+.day.has:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px var(--border-strong); }
+/* the month's best day, said in the figure as well as the fill */
+.day.best .v, .day.best .vs { color: #d9ad33; }
+.day .mid { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
+.day .foot { text-align: center; }
+.day .v.zero, .day .vs.zero { color: var(--text-3); opacity: .5; font-weight: 500; }
+/* Today is a marker, not an alert. At 1.5px of full-strength text on a day that has not traded
+   it read as something being wrong with the cell. */
+.day.today { box-shadow: inset 0 0 0 1px var(--text-3); }
+.day.selected { box-shadow: 0 0 0 2px var(--text); }
+.day.p { background: var(--profit-soft); }
+.day.l { background: var(--loss-soft); }
 .day .d { font-size: 11px; font-weight: 500; color: var(--text-3); }
 .day.p .d, .day.l .d { color: var(--text-2); }
 .day .vs { display: none; font-size: 11px; font-weight: 700; letter-spacing: -0.02em;
@@ -181,7 +190,7 @@ svg.i { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-widt
      the compact figure spills out of the cell at 320px. */
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .day .v { display: block; font-size: 13px; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.day .c { display: block; font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+.day .c { display: block; font-size: 10.5px; color: var(--text-3); margin-top: 1px; text-align: center; }
 .wk {
   border-radius: 6px; border: 1px solid var(--border); background: var(--bg-elev); padding: 10px 12px;
   display: flex; flex-direction: column; justify-content: center; gap: 4px; min-width: 0;
@@ -2378,7 +2387,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.11.0';
+  const APP_VERSION = 'v9.12.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2886,18 +2895,28 @@ if (typeof module !== 'undefined') module.exports = AN;
     for (const k of scope) { const d = days.get(k); if (d) maxAbs = Math.max(maxAbs, Math.abs(d.pnl)); }
     const heat = v => { const r = Math.min(1, Math.abs(v) / maxAbs); const a = (0.10 + 0.30 * Math.sqrt(r)).toFixed(2); return v > 0 ? `background:rgb(var(--profit-rgb) / ${a})` : v < 0 ? `background:rgb(var(--loss-rgb) / ${a})` : ''; };
     const deepDays = new Set((D.risk && D.risk.sessions || []).filter(x => x.consumed >= 0.85 && x.lowDate).map(x => x.lowDate));
+    let topKey = null, topVal = 0;
+    for (const [k, d] of days) if (k.startsWith(mk) && d.pnl > topVal) { topVal = d.pnl; topKey = k; }
     let mNet = 0, mTr = 0, mW = 0, mL = 0;
     for (const [k, d] of days) if (k.startsWith(mk)) { mNet += d.pnl; mTr += d.trades; mW += d.wins; mL += d.losses; }
     $('#cal-month').textContent = `${MONTHS[m]} ${y}`;
     $('#cal-sum').innerHTML = mTr ? `<span class="v num ${cls(mNet)}">${signed(mNet)}</span><span class="k">${plural(mTr, 'trade')} · ${mW + mL ? Math.round(mW / (mW + mL) * 100) : 0}% win rate</span>` : `<span class="k">No trades this month</span>`;
-    let h = visible.map(w => `<div class="dow">${WDNAME[w]}</div>`).join('') + '<div class="dow week">Week</div>';
+    let h = visible.map(w => `<div class="dow">${WDNAME[w].slice(0, 1)}</div>`).join('') + '<div class="dow week">Week</div>';
     for (let r = 0; r < weeks; r++) {
       for (const w of visible) {
         const k = dayAt(r, w);
         if (!k) { h += '<div class="day pad"></div>'; continue; }
         const d = days.get(k), breach = d && deepDays.has(k);
-        h += `<button class="day ${d ? 'has ' + (d.pnl > 0 ? 'p' : d.pnl < 0 ? 'l' : '') : ''} ${k === today ? 'today' : ''} ${k === S.selectedDay ? 'selected' : ''} ${breach ? 'breach' : ''}" data-day="${k}" ${d ? `style="${heat(d.pnl)}" ${breach ? `title="A session bottomed out here, down to ${money((D.risk.sessions.find(x => x.lowDate === k) || {}).worstBalance || 0, 2)}"` : ''}` : 'tabindex="-1"'}>
-          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? dayMarks(d) : ''}${d ? `<span><span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
+        // A day that has not arrived is not a day without trades; it is not a day yet.
+        if (k > today) { h += '<div class="day pad"></div>'; continue; }
+        const best = topKey && k === topKey;
+        const fill = best ? 'background:rgb(217 173 51 / 0.18)' : heat(d ? d.pnl : 0);
+        h += `<button class="day ${d ? 'has ' + (d.pnl > 0 ? 'p' : d.pnl < 0 ? 'l' : '') : ''} ${best ? 'best' : ''} ${k === today ? 'today' : ''} ${k === S.selectedDay ? 'selected' : ''} ${breach ? 'breach' : ''}" data-day="${k}" ${d ? `style="${fill}" ${breach ? `title="A session bottomed out here, down to ${money((D.risk.sessions.find(x => x.lowDate === k) || {}).worstBalance || 0, 2)}"` : ''}` : 'tabindex="-1"'}>
+          <span class="d">${+k.slice(8)}${breach ? '<span class="bflag">' + I.flag + '</span>' : ''}</span>${d ? dayMarks(d) : ''}
+          <span class="mid">${d
+            ? `<span class="v num ${cls(d.pnl)}">${compact(d.pnl)}</span><span class="vs num ${cls(d.pnl)}">${compactTight(d.pnl)}</span>`
+            : `<span class="v num zero">${money(0, 0)}</span><span class="vs num zero">${money(0, 0)}</span>`}</span>
+          ${d ? `<span class="foot"><span class="c">${plural(d.trades, 'trade')}</span></span>` : ''}</button>`;
       }
       // the week total always covers all seven days, whether or not weekends are shown
       let n = 0, tr = 0, wn = 0, l = 0, any = false;
