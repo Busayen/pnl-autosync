@@ -231,9 +231,15 @@ Whether a browser is *allowed* to call it depends on Hyperliquid's CORS headers.
 the sync says so on the card rather than looking fine, and a proxy solves it: put a **Liquid sync
 URL** in Settings instead and it takes precedence over the address.
 
-The **builder prefix** matters. Positions like `xyz:CL-PERP` are builder-deployed, so the `dex`
-field must be sent; without it Hyperliquid answers for its main perp dex and returns nothing. If
-positions come back empty while Liquid shows one, that is the field to suspect.
+The **builder prefix** matters, and so does what it leaves out. Positions like `xyz:CL-PERP` are
+builder-deployed and need the `dex` field; ones like `BTC-PERP` are on Hyperliquid's main perps and
+need it absent. Each builder dex is a separate margin account with its own equity, margin and fills,
+so every one is asked for in turn and the answers are added together — the main perps always, plus
+whatever prefixes you name, comma-separated.
+
+Ask for one and you are told about one. An account holding BTC on the main perps and SOXL on a
+builder dex used to show only the SOXL: not a display gap but two thirds of the positions, their
+fills, and their share of the balance never arriving.
 
 The address is public on-chain data, but it names whoever holds the page, so it is stripped from
 snapshots and backups along with the tokens.

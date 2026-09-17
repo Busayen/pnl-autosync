@@ -1306,7 +1306,9 @@ body:not([data-venue="liquid"]) #lqbal-card { display: none; }
             your account directly and needs no worker. Whether a browser is allowed to call it depends on their CORS headers; if it is
             refused the sync says so, and a proxy URL below is the way round.</div></div>
         <div class="field"><label for="s-lqdex">Builder prefix</label><input type="text" id="s-lqdex" placeholder="xyz" spellcheck="false" autocomplete="off">
-          <div class="help">The bit before the colon in <code>xyz:CL-PERP</code>. Without it Hyperliquid answers for its main perp dex and returns nothing.</div></div>
+          <div class="help">The bit before the colon in <code>xyz:CL-PERP</code>. Each builder dex is its own margin
+            account, so they are read separately and added together. The main perps are always read, whatever is here —
+            leave it empty and you get only those. More than one, separated by commas.</div></div>
         <div class="field full"><label for="s-lqurl">Liquid sync URL <span class="dim">(instead of the address)</span></label><input type="text" id="s-lqurl" placeholder="https://ig-sync.yourname.workers.dev/liquid">
           <div class="help">Anything that answers with Liquid's own shapes — <code>positions</code>, <code>rows</code>, or both. Takes precedence over the address above. Leave both blank and you paste by hand.</div></div>
         <div class="field"><label for="s-lqtoken">Liquid sync token</label><input type="password" id="s-lqtoken" placeholder="optional" autocomplete="off"><div class="help">Sent as a bearer token, if your endpoint wants one.</div></div>
@@ -2399,7 +2401,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.14.0';
+  const APP_VERSION = 'v9.15.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6169,22 +6171,65 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!res.ok) throw new Error(`Hyperliquid rejected ${body.type} (HTTP ${res.status})`);
     try { return JSON.parse(text); } catch { throw new Error(`Hyperliquid returned non-JSON for ${body.type}`); }
   }
-  async function fetchHyperliquid(user, dex) {
-    const withDex = o => (dex ? { ...o, dex } : o);
-    const [st, fills, ledger] = await Promise.all([
-      hlPost(withDex({ type: 'clearinghouseState', user })),
-      hlPost(withDex({ type: 'userFills', user })),
-      // Money in and out, for reconstructing the balance before this page was watching. Unlike the
-      // two above, this shape has not been read from the live endpoint — so it is attempted, and a
-      // refusal or anything that does not look like it costs nothing but the backfill.
-      hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null),
-    ]);
-    const ms = (st && st.marginSummary) || {};
-    const account = { equity: ms.accountValue ?? null, account_value: ms.accountValue ?? null,
-      margin_used: ms.totalMarginUsed ?? null,
-      available_balance: st && st.withdrawable != null ? st.withdrawable : null, username: null };
+  // A builder dex is its own margin account. Asking for one means being told about one — which is
+  // why an account holding BTC on the main perps and SOXL on a builder dex showed only the SOXL:
+  // not a display gap, but two thirds of the positions, their fills, and their share of the
+  // balance never arriving. So every dex is asked, and what comes back is added together.
+  const lqDexes = cfg => {
+    const named = String(cfg || '').split(',').map(x => x.trim()).filter(Boolean);
+    return [...new Set(['', ...named])];               // '' is the main perp dex, always included
+  };
+
+  async function fetchHyperliquid(user, dexCfg) {
+    const dexes = lqDexes(dexCfg);
+    const per = await Promise.all(dexes.map(async dex => {
+      const withDex = o => (dex ? { ...o, dex } : o);
+      const [st, fills] = await Promise.all([
+        hlPost(withDex({ type: 'clearinghouseState', user })).catch(() => null),
+        hlPost(withDex({ type: 'userFills', user })).catch(() => null),
+      ]);
+      return { dex, st, fills };
+    }));
+    // A dex that answered for nothing must not take the whole sync down with it, but one that
+    // answered for none of them means the endpoint is unreachable and that is worth saying.
+    if (per.every(p => !p.st && !p.fills)) throw new Error('Hyperliquid did not answer.');
+
+    // Money in and out is the account's, not a dex's, so it is asked once and without a prefix.
+    // Unlike the two above, this shape has not been read from the live endpoint — so it is
+    // attempted, and a refusal or anything unexpected costs nothing but the balance backfill.
+    const ledger = await hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null);
+
+    // Each dex carries its own equity and its own margin, so the account is their sum. Adding a
+    // null to a number would read as zero, so a dex that did not answer leaves the total unknown
+    // rather than quietly shrinking it.
+    const tally = pick => {
+      let sum = 0, seen = false;
+      for (const { st } of per) {
+        const v = lqNum(pick(st));
+        if (v == null || !lqSane(v)) { if (st) return null; continue; }
+        sum += v; seen = true;
+      }
+      return seen ? lqTrim(sum) : null;
+    };
+    const account = {
+      equity: tally(st => st && st.marginSummary && st.marginSummary.accountValue),
+      account_value: tally(st => st && st.marginSummary && st.marginSummary.accountValue),
+      margin_used: tally(st => st && st.marginSummary && st.marginSummary.totalMarginUsed),
+      available_balance: tally(st => st && st.withdrawable),
+      username: null,
+    };
+
+    const positions = [];
+    for (const { dex, st } of per) positions.push(...mapHlPositions(st, dex));
+    const rows = [];
+    for (const { fills } of per) rows.push(...mapHlFills(fills));
+    rows.sort((a, b) => (b.timeMs || 0) - (a.timeMs || 0));
+    return { account, positions, rows, transfers: Array.isArray(ledger) ? ledger : [] };
+  }
+
+  function mapHlPositions(st, dex) {
     // szi is signed — negative is short — and the dashboard wants a side and an unsigned size
-    const positions = ((st && st.assetPositions) || []).map(a => {
+    return ((st && st.assetPositions) || []).map(a => {
       const q = (a && a.position) || {}, szi = Number(q.szi);
       if (!isFinite(szi) || szi === 0) return null;
       // Hyperliquid already answers with the builder prefix on the coin — "xyz:CL", not "CL" —
@@ -6198,16 +6243,19 @@ if (typeof module !== 'undefined') module.exports = AN;
         unrealizedPnl: q.unrealizedPnl ?? null, liquidationPx: q.liquidationPx ?? null,
         marginUsed: q.marginUsed ?? null, returnOnEquity: q.returnOnEquity ?? null };
     }).filter(Boolean);
-    // `dir` already reads "Open Long" / "Close Long", and closedPnl is only on the closing side —
-    // which is exactly the half that is a trade
-    const rows = [];
+  }
+
+  // `dir` already reads "Open Long" / "Close Long" / "Settlement", and closedPnl is only meaningful
+  // on the closing side — which is exactly the half that is a trade.
+  function mapHlFills(fills) {
+    const out = [];
     for (const f of Array.isArray(fills) ? fills : []) {
       // new Date(NaN).toISOString() throws, and one bad row must not cost you the response
       const ms = Number(f && f.time);
       if (!isFinite(ms)) continue;
       const when = new Date(ms);
       if (!isFinite(when.getTime())) continue;
-      rows.push({
+      out.push({
         time: when.toISOString(), timeMs: ms, type: 'Trade',
         asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
         size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
@@ -6216,8 +6264,9 @@ if (typeof module !== 'undefined') module.exports = AN;
         txHash: f.hash || '',
       });
     }
-    return { account, positions, rows, transfers: Array.isArray(ledger) ? ledger : [] };
+    return out;
   }
+
   async function syncLiquid(silent) {
     const cfg = S.settings;
     if (!lqSourced()) { if (!silent) { toast('No Liquid source set. Add your wallet address in Settings, or paste instead.'); openSettings(); } return; }

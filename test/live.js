@@ -1483,6 +1483,20 @@ async function liquidSync(browser) {
 // With a wallet address and no proxy, the page reads Hyperliquid's public info endpoint itself.
 // Its responses are intercepted here with the shapes their documentation describes, which is the
 // only way to check the mapping without reaching the real thing.
+// A builder dex is its own margin account, so the account holds two of them: the main perps and
+// the builder's. Asking for one and being told about one is the whole bug this guards.
+const HL_MAIN = {
+  marginSummary: { accountValue: '40.00', totalMarginUsed: '30.00' },
+  withdrawable: '10.00',
+  assetPositions: [
+    { type: 'oneWay', position: { coin: 'BTC', szi: '0.0247', entryPx: '76046.3', unrealizedPnl: '7.6',
+      leverage: { type: 'isolated', value: 40 }, liquidationPx: '75162.99', marginUsed: '52.62' } },
+  ],
+};
+const HL_MAIN_FILLS = [
+  { coin: 'BTC', px: '76046.3', sz: '0.0247', side: 'B', time: 1789006000000, dir: 'Open Long',
+    closedPnl: '0.0', fee: '0.84', hash: '0xbtc' },
+];
 const HL_STATE = {
   marginSummary: { accountValue: '82.62', totalMarginUsed: '81.94' },
   withdrawable: '0.68',
@@ -1516,8 +1530,9 @@ async function hyperliquidDirect(browser) {
     const body = JSON.parse(route.request().postData() || '{}');
     seen.push(body);
     if (state.hlDown) return route.fulfill({ status: 500, body: 'upstream down' });
-    await route.fulfill({ status: 200, contentType: 'application/json',
-      body: JSON.stringify(body.type === 'userFills' ? HL_FILLS : HL_STATE) });
+    const fills = body.type === 'userFills';
+    const pick = body.dex === 'xyz' ? (fills ? HL_FILLS : HL_STATE) : (fills ? HL_MAIN_FILLS : HL_MAIN);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pick) });
   });
   await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
     // a stand-in: the repo is public, and a real address here would tie it to whoever owns it
@@ -1529,14 +1544,20 @@ async function hyperliquidDirect(browser) {
   await page.selectOption('#venue', 'liquid');
   await page.waitForTimeout(1600);
 
-  check('both info calls are made', seen.length >= 2, JSON.stringify(seen.map(b => b.type)));
+  check('every dex is asked, not just the builder one',
+    seen.filter(b => b.type === 'clearinghouseState').length === 2
+    && seen.filter(b => b.type === 'userFills').length === 2,
+    JSON.stringify(seen.map(b => `${b.type}:${b.dex || 'main'}`)));
   check('each carries the wallet address',
     seen.every(b => b.user === '0x1111111111111111111111111111111111111111'), JSON.stringify(seen[0]));
   // Positions and fills are the builder dex's and need naming as such. Money in and out is the
   // account's — the same USDC whichever dex it was traded on — so that one is asked account-wide.
-  check('and the builder prefix on what belongs to the dex',
-    seen.filter(b => /clearinghouseState|userFills/.test(b.type)).every(b => b.dex === 'xyz'),
-    JSON.stringify(seen.map(b => `${b.type}:${b.dex || '-'}`)));
+  check('the builder dex is named when it is the one being asked about',
+    seen.filter(b => b.dex === 'xyz').length === 2,
+    JSON.stringify(seen.map(b => `${b.type}:${b.dex || 'main'}`)));
+  check('and the main perps are asked for without a prefix, which is what names them',
+    seen.filter(b => /clearinghouseState|userFills/.test(b.type) && b.dex == null).length === 2,
+    JSON.stringify(seen.map(b => `${b.type}:${b.dex || 'main'}`)));
   check('but not on the ledger, which is the account\'s',
     seen.filter(b => /LedgerUpdates/.test(b.type)).every(b => b.dex == null),
     JSON.stringify(seen.map(b => `${b.type}:${b.dex || '-'}`)));
@@ -1544,7 +1565,10 @@ async function hyperliquidDirect(browser) {
   const lq = await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
     return { pos: s.lq.positions || [], trades: s.trades.filter(t => t.kind === 'trade'),
              costs: s.trades.filter(t => t.kind === 'cost').length }; });
-  check('a zero-size position is dropped', lq.pos.length === 2, JSON.stringify(lq.pos.map(p => p.name)));
+  check('positions from both dexes arrive, and the zero-size one is dropped',
+    lq.pos.length === 3, JSON.stringify(lq.pos.map(p => p.name)));
+  check('including the one on the main perps, which carries no prefix',
+    lq.pos.some(p => p.name === 'BTC' && p.size === 0.0247), JSON.stringify(lq.pos.map(p => p.name)));
   const cl = lq.pos.find(p => p.name === 'xyz:CL'), eth = lq.pos.find(p => p.name === 'ETH');
   check('a positive size reads long', !!cl && cl.long && cl.size === 14.183, JSON.stringify(cl));
   check('a negative size reads short, with the sign taken off',
@@ -1553,14 +1577,22 @@ async function hyperliquidDirect(browser) {
   check('the builder prefix is not written twice onto a coin that already carries it',
     !!cl && cl.symbol === 'xyz:CL', cl && cl.symbol);
   check('so does the liquidation price', !!cl && cl.liq === 92.0035);
+  // each dex keeps its own equity and margin, so the account is their sum
+  const acc = await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq || {}).account || {});
+  check('the account is every dex added together',
+    Number(acc.account_value) === 122.62 && Number(acc.margin_used) === 111.94,
+    JSON.stringify(acc));
+  check('and so is what is free', Number(acc.available_balance) === 10.68, String(acc.available_balance));
   check('the closing fill becomes a trade', lq.trades.length === 1, JSON.stringify(lq.trades));
+  check('and the main dex\'s fill is read too, as the fee it is',
+    lq.costs === 2, String(lq.costs));
   check('a fill with an unreadable timestamp is skipped on its own',
     !lq.trades.some(t => t.instrument === 'SOL'), JSON.stringify(lq.trades.map(t => t.instrument)));
-  check('the opening fill becomes a fee, not a trade', lq.costs === 1);
+  check('the opening fill becomes a fee, not a trade', lq.costs >= 1, String(lq.costs));
   check('and the entry is recovered from the realised P&L',
     Math.abs(lq.trades[0].openLevel - 95.104) < 0.001, String(lq.trades[0].openLevel));
   check('and the rest of the response survives it',
-    lq.trades[0].instrument === 'CL' && lq.pos.length === 2, JSON.stringify(lq.trades[0].instrument));
+    lq.trades[0].instrument === 'CL' && lq.pos.length === 3, JSON.stringify(lq.trades[0].instrument));
 
   await page.evaluate(() => document.querySelector('[data-section="open"]').click());
   await page.waitForTimeout(400);
@@ -1575,7 +1607,7 @@ async function hyperliquidDirect(browser) {
     /error/i.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
     await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
   check('and what it already read is kept',
-    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 2);
+    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 3);
   check('no page errors reading Hyperliquid', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
 }
