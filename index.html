@@ -1903,7 +1903,10 @@ const CORE = (() => {
     const dayKeys = Array.from(days.keys()).sort();
     const net = all.reduce((a, t) => a + t.pnl, 0);
     const tradeNet = trades.reduce((a, t) => a + t.pnl, 0);
-    const costNet = costs.reduce((a, t) => a + t.pnl, 0);
+    // Fees charged on a close are booked inside that trade's pnl, not as a row of their own, so
+    // summing the cost rows alone understates what trading cost. Net is unaffected either way.
+    const feesInTrades = trades.reduce((a, t) => a + (Number(t.fee) || 0), 0);
+    const costNet = costs.reduce((a, t) => a + t.pnl, 0) - feesInTrades;
 
     const wins = trades.filter(t => t.pnl > 0), losses = trades.filter(t => t.pnl < 0);
     const decided = wins.length + losses.length;
@@ -2401,7 +2404,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.15.0';
+  const APP_VERSION = 'v9.16.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -5931,6 +5934,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (!lqSane(px) || !lqSane(open)) continue;
       out.push({ ...base, kind: 'trade', direction: g.long ? 'BUY' : 'SELL',
                  openLevel: lqTrim(open), closeLevel: lqTrim(px),
+                 // A close pays a fee too, and it is already inside pnl below. Kept here as well
+                 // so the cost line can name what was really paid: without it the figure under
+                 // Net P&L counts the fees on entries and silently drops the ones on exits, which
+                 // on a book that opens and closes everything is about half the bill.
+                 ...(g.fee ? { fee: lqCents(g.fee) } : {}),
                  // kept to six places, not two: a venue can settle in fractions of a cent, and
                  // rounding every row to money before summing builds in a drift the totals never lose
                  pnl: lqCents(g.gross - g.fee) });
@@ -5962,9 +5970,11 @@ if (typeof module !== 'undefined') module.exports = AN;
       const first = rows.reduce((a, t) => (t.closeTs || '') < (a.closeTs || '') ? t : a, rows[0]);
       // the stored P&L is already net of that fill's fee, so summing it needs no fee to recover
       const pnl = lqCents(rows.reduce((a, t) => a + (t.pnl || 0), 0));
+      const fee = rows.reduce((a, t) => a + (Number(t.fee) || 0), 0);
       const wavg = k => size > 0
         ? lqTrim(rows.reduce((a, t) => a + (t[k] || 0) * (parseFloat(t.size) || 0), 0) / size) : null;
       const merged = { ...first, reference: key, size: String(lqTrim(size)), pnl,
+                       ...(fee ? { fee: lqCents(fee) } : {}),
                        ...(rows.length > 1 ? { fills: rows.length } : {}) };
       if (first.kind !== 'cost') { merged.openLevel = wavg('openLevel'); merged.closeLevel = wavg('closeLevel'); }
       merged.id = C.tradeKey(merged);
@@ -6114,7 +6124,10 @@ if (typeof module !== 'undefined') module.exports = AN;
       const moves = lqTransfers(parsed.transfers || parsed.rows);
       if (moves.length) backfillBalance(liquidRecords(parsed.rows), moves);
     }
-    let added = 0;
+    // `added` counts new trades, which is what the toast is about. `changed` is the wider
+    // question the screen cares about: a resting block that grew a leg adds no row but moves the
+    // P&L on one, and a poll that reports no change leaves every figure on the page stale.
+    let added = 0, changed = false;
     if (parsed.rows) {
       const at = new Map(S.trades.map((t, i) => [t.reference, i]));
       const fresh = [];
@@ -6125,11 +6138,15 @@ if (typeof module !== 'undefined') module.exports = AN;
         const i = at.get(r.reference);
         if (i == null) { fresh.push(r); if (r.kind === 'trade') added++; continue; }
         const was = S.trades[i];
-        if (was.size !== r.size || was.pnl !== r.pnl) S.trades[i] = { ...was, ...r, id: C.tradeKey(r) };
+        if (was.size !== r.size || was.pnl !== r.pnl || (was.fee || 0) !== (r.fee || 0)) {
+          S.trades[i] = { ...was, ...r, id: C.tradeKey(r) };
+          changed = true;
+        }
       }
       if (fresh.length) {
         S.trades = S.trades.concat(fresh.map(t => ({ ...t, id: C.tradeKey(t) })))
           .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        changed = true;
       }
       // The stretch of time this window covers, it covers completely: these rules are the only
       // thing that should have written a Liquid row inside it. One that matches nothing they now
@@ -6138,11 +6155,14 @@ if (typeof module !== 'undefined') module.exports = AN;
       if (records.length) {
         const refs = new Set(records.map(r => r.reference));
         const from = records.reduce((a, r) => (r.closeTs < a ? r.closeTs : a), '9999');
+        const before = S.trades.length;
         S.trades = S.trades.filter(t => t.account !== 'Liquid' || !t.closeTs
           || t.closeTs < from || refs.has(t.reference));
+        if (S.trades.length !== before) changed = true;
       }
       const kept = dropReversalTwins(S.trades);
       if (kept.length !== S.trades.length) {
+        changed = true;
         const have = new Set(kept.map(t => t.reference));
         for (const f of fresh) if (f.kind === 'trade' && !have.has(f.reference)) added--;
         S.trades = kept;
@@ -6150,7 +6170,7 @@ if (typeof module !== 'undefined') module.exports = AN;
       }
     }
     S.lq.fetched = new Date().toISOString();
-    return added;
+    return { added, changed };
   }
 
   // Autosync. The endpoint is whatever answers with Liquid's own shapes — a worker route, a proxy,
@@ -6290,14 +6310,14 @@ if (typeof module !== 'undefined') module.exports = AN;
       // Same the other way round: applyLiquid appends to S.trades, which is now the IG ledger if
       // the venue changed while Liquid was answering.
       if (S.venue !== 'liquid') return;
-      const added = applyLiquid(parsed);
+      const { added, changed } = applyLiquid(parsed);
       lqFails = 0;
       persist();
       // Rebuilding the whole page every fifteen seconds throws away every chart, every tooltip and
       // anything you were in the middle of. Only a poll that actually changed the book earns that;
       // the rest just move the balance, so only the balance is repainted.
       if (S.venue === 'liquid') {
-        if (added) { killCharts(); renderAll(); }
+        if (changed) { killCharts(); renderAll(); }
         else {
           if (S.section === 'overview') drawLiquidBalance();
           if (S.section === 'open') renderLiquidOpen();
@@ -6385,7 +6405,7 @@ if (typeof module !== 'undefined') module.exports = AN;
         S.lq.account = parsed.account || S.lq.account;
         S.lq.fetched = new Date().toISOString();
       }
-      const n = applyLiquid(parsed);
+      const { added: n } = applyLiquid(parsed);
       persist(); done(); killCharts(); renderAll();
       toast(`Liquid: ${plural(n, 'trade')} imported, `
         + `${plural((S.lq && S.lq.positions || []).length, 'open position')} held.`, 8000);

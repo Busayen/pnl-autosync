@@ -1933,6 +1933,23 @@ async function liquidFillFolding(browser) {
   check('the opening fills fold into one fee row', !!cost && cost.fills === 2, JSON.stringify(cost));
   check('with both legs charged', !!cost && Math.abs(cost.pnl + 0.379) < 1e-6, cost && String(cost.pnl));
 
+  // A close pays a fee as surely as an open does, but it is charged inside the trade's P&L rather
+  // than as a row of its own. Reading the cost line off the fee rows alone counts the entries and
+  // drops the exits — on a book that closes everything it opens, about half the bill goes missing.
+  check('a close records the fee it paid, not only the P&L net of it',
+    !!big && Math.abs(big.fee - 0.649) < 1e-6, big && String(big.fee));
+  check('and so does one whose fee outran what it made',
+    !!other && Math.abs(other.fee - 0.244) < 1e-6, other && String(other.fee));
+  check('a fee row does not carry it twice', !!cost && cost.fee == null, cost && String(cost.fee));
+  const costLine = () => page.$$eval('.kpi .sub', ns => (ns[0] || {}).textContent.trim());
+  // 0.649 closing + 0.244 closing + 0.379 opening
+  check('the cost line names every fee paid, entry and exit alike',
+    /1\.27/.test(await costLine()), await costLine());
+
+  const netCard = () => page.$$eval('.kpi .value', ns => (ns[0] || {}).textContent.trim());
+  // 3.91325 + (0.024 - 0.244) - 0.379
+  check('the net on the page is the net in the book', /3\.31/.test(await netCard()), await netCard());
+
   // the same window comes back on every poll and must not pile up or drift
   const n = all.length;
   await page.waitForTimeout(7000);
@@ -1949,6 +1966,15 @@ async function liquidFillFolding(browser) {
     grown && String(grown.pnl));
   check('while the entry it closed against stays put',
     !!grown && Math.abs(grown.openLevel - 94.30) < 1e-9, grown && String(grown.openLevel));
+  check('and the fee grows with it', !!grown && Math.abs(grown.fee - 0.760) < 1e-6,
+    grown && String(grown.fee));
+  check('so the cost line grows too', /1\.38/.test(await costLine()), await costLine());
+  // A poll that files no new row still moved money on one. Repainting only when a row was added
+  // leaves the whole page — net, win rate, profit factor, the calendar — showing the figures from
+  // before the order finished filling, until something unrelated happens to trigger a render.
+  // 4.80225 + (0.024 - 0.244) - 0.379
+  check('and the page shows the new net, not the one from before the order finished filling',
+    /4\.20/.test(await netCard()), await netCard());
 
   check('no page errors folding fills', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
@@ -1957,9 +1983,13 @@ async function liquidFillFolding(browser) {
 // Rows saved one-per-fill before folding existed have to become the same rows a fresh sync would
 // write, or the next sync files a second copy of every order alongside the first.
 async function liquidFillMigration(browser) {
+  // both legs closed against 94.30, which is what makes them one order: (94.60 − 94.30) × 0.648
+  // and (94.65 − 94.30) × 1.051. The stored rows below say the same thing one fill at a time, so
+  // the fold and the sync that follows it have to agree — a fixture whose stored entry the fills
+  // never produce would pass the fold and fail the moment the feed was consulted.
   state = { orders: [], positions: [], lqRows: [
-    LQ_FILL({ size: '0.648', price: '94.60', fee: '0.036', closedPnl: '0.236', txHash: '0xb1' }),
-    LQ_FILL({ size: '1.051', price: '94.65', fee: '0.058', closedPnl: '0.388', txHash: '0xb1' }),
+    LQ_FILL({ size: '0.648', price: '94.60', fee: '0.036', closedPnl: '0.1944', txHash: '0xb1' }),
+    LQ_FILL({ size: '1.051', price: '94.65', fee: '0.058', closedPnl: '0.36785', txHash: '0xb1' }),
   ] };
   const { page, errs } = await openPage(browser);
   // written the way the previous build wrote them: one row per fill, LQ-<hash>-<side>-<size>-<price>
@@ -1968,11 +1998,11 @@ async function liquidFillMigration(browser) {
     s.venue = 'liquid';
     s.books = { ig: { trades: s.trades }, liquid: { trades: [
       { kind: 'trade', date: '2026-09-10', time: '10:34', instrument: 'xyz:CL', direction: 'BUY',
-        size: '0.648', openLevel: 94.2915, closeLevel: 94.6, currency: 'USD', pnl: 0.2,
+        size: '0.648', openLevel: 94.30, closeLevel: 94.6, currency: 'USD', pnl: 0.1584,
         reference: 'LQ-0xb1-sell-0.648-94.6', openTs: '', closeTs: '2026-09-10T10:34:12.400Z',
         account: 'Liquid', id: 'ref:LQ-0xb1-sell-0.648-94.6' },
       { kind: 'trade', date: '2026-09-10', time: '10:34', instrument: 'xyz:CL', direction: 'BUY',
-        size: '1.051', openLevel: 94.2915, closeLevel: 94.65, currency: 'USD', pnl: 0.33,
+        size: '1.051', openLevel: 94.30, closeLevel: 94.65, currency: 'USD', pnl: 0.30985,
         reference: 'LQ-0xb1-sell-1.051-94.65', openTs: '', closeTs: '2026-09-10T10:34:12.400Z',
         account: 'Liquid', id: 'ref:LQ-0xb1-sell-1.051-94.65' },
     ] } };
@@ -1984,14 +2014,20 @@ async function liquidFillMigration(browser) {
   const after = await rows();
   check('rows saved one per fill are folded on load', after.length === 1, JSON.stringify(after.map(t => t.size)));
   check('into the size they always summed to', after[0].size === '1.699', after[0].size);
-  check('carrying the P&L they always summed to', Math.abs(after[0].pnl - 0.53) < 1e-9, String(after[0].pnl));
-  check('and the entry both legs shared', Math.abs(after[0].openLevel - 94.2915) < 1e-6, String(after[0].openLevel));
+  check('carrying the P&L they always summed to', Math.abs(after[0].pnl - 0.46825) < 1e-9, String(after[0].pnl));
+  check('and the entry both legs shared', Math.abs(after[0].openLevel - 94.30) < 1e-6, String(after[0].openLevel));
 
   // the point of matching the reference: the very next sync must recognise its own row
   await page.waitForTimeout(7000);
   const settled = await rows();
   check('and the next sync recognises it instead of filing a second copy',
     settled.length === 1, JSON.stringify(settled.map(t => `${t.reference} ${t.size}`)));
+  // reconciling against the feed is what repairs a row an older rule wrote, so the sync is allowed
+  // to rewrite it — but only ever to what the venue's own numbers give, never away from them
+  check('leaving the entry the venue\'s numbers give',
+    Math.abs(settled[0].openLevel - 94.30) < 1e-6, String(settled[0].openLevel));
+  check('and the fee it never used to record', Math.abs(settled[0].fee - 0.094) < 1e-6,
+    String(settled[0].fee));
   check('no page errors folding stored fills', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
 }

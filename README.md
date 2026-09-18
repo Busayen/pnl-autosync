@@ -129,6 +129,11 @@ long, and the mirror for a short. Two closes off the same entry both resolve to 
 which is how you know it is right. Each closed trade is recorded net of its closing fee; an opening
 fill has no result yet but its fee is already paid, so that lands on its own day as a cost.
 
+So fees arrive by two routes: an entry's is a cost row of its own, an exit's is charged inside the
+trade it belongs to. Net P&L is the same either way, but the fee figure beneath it counts both — on
+a book that closes everything it opens, reading it off the cost rows alone would name about half
+what was really paid.
+
 **Only a close is a trade.** Hyperliquid stamps every fill with a realised P&L — `0.0` on the ones
 that opened a position — so the field being present is not the signal; money having been realised
 is. And reversing a position closes one side and opens the other in one stroke: a venue that reports
