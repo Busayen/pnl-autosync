@@ -2404,7 +2404,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.16.0';
+  const APP_VERSION = 'v9.17.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -6241,8 +6241,24 @@ if (typeof module !== 'undefined') module.exports = AN;
 
     const positions = [];
     for (const { dex, st } of per) positions.push(...mapHlPositions(st, dex));
-    const rows = [];
-    for (const { fills } of per) rows.push(...mapHlFills(fills));
+    // `clearinghouseState` answers for the dex it is asked about — that is the whole reason every
+    // dex is asked. `userFills` does not: it answers for the account however it is asked, so each
+    // dex hands back the same fills and asking two returns every one of them twice. Folding merges
+    // the copies into the order they belong to rather than filing a second row, so this never
+    // looked like an extra trade — it looked like one trade of twice the size, for twice the
+    // money, with twice the fee. `tid` is the per-fill id; where it is missing the rest of the
+    // fill stands in for it, which is weaker but still separates two fills of the same order.
+    const rows = [], seenFill = new Set();
+    for (const { fills } of per) {
+      for (const r of mapHlFills(fills)) {
+        const id = r.tid == null
+          ? `f:${r.txHash}|${r.timeMs}|${r.asset}|${r.side}|${r.direction}|${r.size}|${r.price}`
+          : `t:${r.tid}`;
+        if (seenFill.has(id)) continue;
+        seenFill.add(id);
+        rows.push(r);
+      }
+    }
     rows.sort((a, b) => (b.timeMs || 0) - (a.timeMs || 0));
     return { account, positions, rows, transfers: Array.isArray(ledger) ? ledger : [] };
   }
@@ -6280,7 +6296,10 @@ if (typeof module !== 'undefined') module.exports = AN;
         asset: f.coin, side: f.side === 'A' ? 'sell' : 'buy', direction: f.dir || '',
         size: String(f.sz), price: String(f.px), fee: String(f.fee == null ? 0 : f.fee),
         ...(f.closedPnl == null || f.closedPnl === '' ? {} : { closedPnl: String(f.closedPnl) }),
-        // deliberately not f.tid: that is per fill, and fills of one order share only the hash
+        // deliberately not the block key: tid is per fill, and fills of one order share only the
+        // hash. It is kept beside it because it is the one thing that tells two fills apart, which
+        // is what deduplicating a fill answered for by several dexes needs.
+        ...(f.tid == null ? {} : { tid: f.tid }),
         txHash: f.hash || '',
       });
     }

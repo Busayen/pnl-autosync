@@ -246,6 +246,13 @@ Ask for one and you are told about one. An account holding BTC on the main perps
 builder dex used to show only the SOXL: not a display gap but two thirds of the positions, their
 fills, and their share of the balance never arriving.
 
+The two questions do not behave alike, though. `clearinghouseState` answers for the dex it is asked
+about, which is why each has to be asked. `userFills` answers for the whole account however it is
+asked — so asking two dexes hands back every fill twice. Because fills of one order are folded into
+that order, a duplicate never appears as an extra trade; it appears as one trade of twice the size,
+for twice the money, with twice the fee. Fills are therefore deduplicated by `tid` before anything
+is folded, and a row already saved at twice its size is put right by the next sync.
+
 The address is public on-chain data, but it names whoever holds the page, so it is stripped from
 snapshots and backups along with the tokens.
 

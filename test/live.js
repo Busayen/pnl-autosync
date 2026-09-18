@@ -1493,9 +1493,23 @@ const HL_MAIN = {
       leverage: { type: 'isolated', value: 40 }, liquidationPx: '75162.99', marginUsed: '52.62' } },
   ],
 };
-const HL_MAIN_FILLS = [
+// `clearinghouseState` answers for the dex it is asked about — that is the whole reason both are
+// asked. `userFills` does not: it answers for the account however it is asked, so asking two dexes
+// returns every fill twice. Serving the same array to both is what the live endpoint does, and a
+// fixture that handed each dex its own private fills was why this went unseen.
+const HL_ACCOUNT_FILLS = [
   { coin: 'BTC', px: '76046.3', sz: '0.0247', side: 'B', time: 1789006000000, dir: 'Open Long',
-    closedPnl: '0.0', fee: '0.84', hash: '0xbtc' },
+    closedPnl: '0.0', fee: '0.84', hash: '0xbtc', tid: 91 },
+  { coin: 'CL', px: '94.67', sz: '10.828', side: 'A', time: 1789005299646, dir: 'Close Long',
+    closedPnl: '-4.699352', fee: '0.60111', hash: '0xbbb', tid: 92 },
+  // Hyperliquid stamps every fill with closedPnl, "0.0" on the ones that opened a position. A
+  // fixture that left the field off hid a bug where that zero read as a realised result.
+  { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long',
+    closedPnl: '0.0', fee: '0.586', hash: '0xccc', tid: 93 },
+  // one unreadable timestamp: new Date(NaN).toISOString() throws, and the throw used to take the
+  // whole response with it — every good fill in it, on every poll from then on
+  { coin: 'SOL', px: '150', sz: '3', side: 'A', time: 'not-a-time', dir: 'Close Long',
+    closedPnl: '9', fee: '0.1', hash: '0xeee', tid: 94 },
 ];
 const HL_STATE = {
   marginSummary: { accountValue: '82.62', totalMarginUsed: '81.94' },
@@ -1509,19 +1523,6 @@ const HL_STATE = {
     { type: 'oneWay', position: { coin: 'BTC', szi: '0', entryPx: '0' } },
   ],
 };
-const HL_FILLS = [
-  { coin: 'CL', px: '94.67', sz: '10.828', side: 'A', time: 1789005299646, dir: 'Close Long',
-    closedPnl: '-4.699352', fee: '0.60111', hash: '0xbbb' },
-  // Hyperliquid stamps every fill with closedPnl, "0.0" on the ones that opened a position. A
-  // fixture that left the field off hid a bug where that zero read as a realised result.
-  { coin: 'CL', px: '95.104', sz: '10.515', side: 'B', time: 1789003787639, dir: 'Open Long',
-    closedPnl: '0.0', fee: '0.586', hash: '0xccc' },
-  // one unreadable timestamp: new Date(NaN).toISOString() throws, and the throw used to take the
-  // whole response with it — every good fill in it, on every poll from then on
-  { coin: 'SOL', px: '150', sz: '3', side: 'A', time: 'not-a-time', dir: 'Close Long',
-    closedPnl: '9', fee: '0.1', hash: '0xeee' },
-];
-
 async function hyperliquidDirect(browser) {
   state = { orders: [], positions: [] };
   const { page, errs } = await openPage(browser);
@@ -1531,7 +1532,7 @@ async function hyperliquidDirect(browser) {
     seen.push(body);
     if (state.hlDown) return route.fulfill({ status: 500, body: 'upstream down' });
     const fills = body.type === 'userFills';
-    const pick = body.dex === 'xyz' ? (fills ? HL_FILLS : HL_STATE) : (fills ? HL_MAIN_FILLS : HL_MAIN);
+    const pick = fills ? HL_ACCOUNT_FILLS : body.dex === 'xyz' ? HL_STATE : HL_MAIN;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pick) });
   });
   await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
@@ -1584,6 +1585,19 @@ async function hyperliquidDirect(browser) {
     JSON.stringify(acc));
   check('and so is what is free', Number(acc.available_balance) === 10.68, String(acc.available_balance));
   check('the closing fill becomes a trade', lq.trades.length === 1, JSON.stringify(lq.trades));
+  // The same fill coming back from every dex asked folds into the row it belongs to rather than
+  // filing a second one — so it does not show up as an extra trade. It shows up as one trade of
+  // twice the size, for twice the money, which is far harder to see and worse to act on.
+  check('a fill answered for by every dex is counted once, not once per dex',
+    lq.trades[0].size === '10.828', lq.trades[0].size);
+  check('so it is not a trade that took two fills either', lq.trades[0].fills == null,
+    String(lq.trades[0].fills));
+  check('and the P&L is the one fill\'s, net of the one fee',
+    Math.abs(lq.trades[0].pnl - (-4.699352 - 0.60111)) < 1e-9, String(lq.trades[0].pnl));
+  const btcFee = (await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades
+    .filter(t => t.kind === 'cost' && t.instrument === 'BTC')))[0];
+  check('nor is the fee on an opening fill charged once per dex',
+    !!btcFee && Math.abs(btcFee.pnl + 0.84) < 1e-9, btcFee && String(btcFee.pnl));
   check('and the main dex\'s fill is read too, as the fee it is',
     lq.costs === 2, String(lq.costs));
   check('a fill with an unreadable timestamp is skipped on its own',
@@ -1599,6 +1613,23 @@ async function hyperliquidDirect(browser) {
   check('the card reports it live',
     /Live/.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
     await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
+
+  // The rows already saved at twice their size have to come back on their own. Reconciling against
+  // the feed is what repairs a row an older rule wrote, and one written while every dex was
+  // answering for the same fills is exactly that — nobody should have to delete them by hand.
+  await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
+    const t = s.trades.find(x => x.kind === 'trade' && x.instrument === 'CL');
+    t.size = '21.656'; t.pnl = -10.600924; t.fills = 2;
+    localStorage.setItem('ledger:v4', JSON.stringify(s)); });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(8000);
+  const healed = await page.evaluate(() => JSON.parse(localStorage.getItem('ledger:v4')).trades
+    .filter(t => t.kind === 'trade' && t.instrument === 'CL'));
+  check('a row already saved at twice its size is put right by the next sync',
+    healed.length === 1 && healed[0].size === '10.828', JSON.stringify(healed.map(t => t.size)));
+  check('and so is the money on it',
+    healed.length === 1 && Math.abs(healed[0].pnl - (-4.699352 - 0.60111)) < 1e-9,
+    healed.length ? String(healed[0].pnl) : '—');
 
   // a browser refused by CORS, or an upstream that falls over, must say so rather than look fine
   state.hlDown = true;
