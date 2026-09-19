@@ -479,6 +479,9 @@ textarea.paste::placeholder { color: var(--text-3); }
 .snav.active { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.3); }
 [data-theme="light"] .snav.active { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 .kpi-note { font-size: 11.5px; margin-top: -10px; } .kpi-note:empty { display: none; }
+.bal-check { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--grid); }
+.bal-check b { color: var(--text-2); font-weight: 600; }
+.bal-check.off { color: var(--loss); } .bal-check.off b { color: var(--loss); }
 .kpi .delta.flat { background: var(--grid); color: var(--text-3); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .stat-row { display: flex; gap: 26px; flex-wrap: wrap; padding: 4px 0 14px; }
@@ -2404,7 +2407,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.17.0';
+  const APP_VERSION = 'v9.18.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2687,6 +2690,29 @@ if (typeof module !== 'undefined') module.exports = AN;
   // Balance is not P&L. It moves with money in and out as well as with results, and it carries
   // unrealised swings the trade history never sees — so it gets its own line rather than being
   // folded into the equity curve, where the two would quietly contradict each other.
+  // The balance from first principles: what was put in, what trading did with it, and what the
+  // open positions are worth right now. Every term is something the venue has already said, so
+  // this owes nothing to the one number it is checking — which is the point. What it leaves out is
+  // funding, deliberately: a perps account pays or collects it continuously and the venue does not
+  // itemise it here, so the two figures drift apart slowly and that drift is the funding.
+  function derivedBalance() {
+    const lq = S.lq || {}, flow = lq.flow;
+    if (!flow || !isFinite(flow.in)) return null;
+    // realised, already net of every fee, from the rows the fills were folded into
+    let realised = 0, rows = 0;
+    for (const t of S.trades || []) {
+      if (t.account !== 'Liquid' || t.kind === 'cash') continue;
+      if (isFinite(t.pnl)) { realised += t.pnl; rows++; }
+    }
+    if (!rows) return null;
+    const open = (lq.positions || []).reduce((a, p) => a + (isFinite(p.pnl) ? p.pnl : 0), 0);
+    const acc = lq.account || null;
+    const said = acc ? lqNum(acc.account_value != null ? acc.account_value : acc.equity) : null;
+    const value = lqTrim(flow.in - flow.out + realised + open);
+    return { value, in: flow.in, out: flow.out, realised, open, said,
+             gap: said == null ? null : lqTrim(said - value), from: flow.from };
+  }
+
   function drawLiquidBalance() {
     if (S.venue !== 'liquid' || !$('#lqbal-card')) return;
     const bal = (S.lq && Array.isArray(S.lq.bal) ? S.lq.bal : []).filter(p => Array.isArray(p) && isFinite(p[1]));
@@ -2702,13 +2728,25 @@ if (typeof module !== 'undefined') module.exports = AN;
       : `<span class="big num">${moneyIn(now, 'USD')}</span>`
         + (move == null || bal.length < 2 ? '' : `<span class="range ${cls(move)}">${signed(move)} since ${fdate(new Date(bal[0][0]).toISOString().slice(0, 10), false)}</span>`);
     const note = $('#lqbal-note');
-    if (note) note.textContent = S.lq && S.lq.backfilled && bal.length
+    const how = S.lq && S.lq.backfilled && bal.length
       ? 'Sampled from the account as the page reads it. Before it started watching the line is'
         + ' reconstructed by walking every fill and transfer backwards from the first real reading,'
         + ' so that stretch moves when something settles rather than while a position breathes.'
         + ' Funding is not included in it.'
       : 'Sampled from the account as the page reads it. The venue reports what the balance is now,'
         + ' never what it was, so this begins when you start watching.';
+    // The same number worked out the other way. It is not here to be prettier than the reported
+    // one — it is here to disagree with it. A balance read straight off the venue has no way of
+    // being checked, and the last two things to go wrong with this one were both arithmetic no
+    // single reading could have caught.
+    const d = derivedBalance();
+    const off = d && d.gap != null && Math.abs(d.gap) > Math.max(1, Math.abs(d.value) * 0.05);
+    if (note) note.innerHTML = esc(how) + (!d ? '' :
+      `<div class="bal-check${off ? ' off' : ''}">Worked out from what went in and out, what trading`
+      + ` settled, and what is open right now: <b>${esc(moneyIn(d.value, 'USD'))}</b>`
+      + (d.said == null ? '' : ` against <b>${esc(moneyIn(d.said, 'USD'))}</b> reported`
+        + ` — ${esc(signed(d.gap))} apart${off ? ', which is more than funding explains'
+        : '. Funding is the difference'}.`) + '</div>');
     const empty = $('#lqbal-empty');
     if (bal.length < 2 || typeof Chart === 'undefined') {
       empty.classList.remove('hidden');
@@ -5767,7 +5805,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   // trades, separate calendar, separate filters, separate everything.
   const VENUES = [['ig', 'IG'], ['liquid', 'Liquid']];
   const venueName = v => (VENUES.find(x => x[0] === v) || VENUES[0])[1];
-  const emptyLq = () => ({ positions: [], account: null, fetched: null });
+  const emptyLq = () => ({ positions: [], account: null, fetched: null, flow: null });
   const blankFilter = () => ({ tf: 'all', from: '', to: '', instrument: '', side: '', account: '', tag: '' });
   // Risk analytics are built on stop levels and session capital, neither of which a perpetuals
   // venue reports, so that tab is not offered where it could only ever be blank.
@@ -6124,6 +6162,15 @@ if (typeof module !== 'undefined') module.exports = AN;
       const moves = lqTransfers(parsed.transfers || parsed.rows);
       if (moves.length) backfillBalance(liquidRecords(parsed.rows), moves);
     }
+    // What was put in and taken out. Recomputed from the whole window each poll rather than added
+    // to, so re-reading the same ledger cannot inflate it.
+    {
+      const moves = lqTransfers(parsed.transfers || parsed.rows);
+      if (moves.length) S.lq.flow = moves.reduce((a, m) => {
+        if (m.amt >= 0) a.in += m.amt; else a.out -= m.amt;
+        return a;
+      }, { in: 0, out: 0, n: moves.length, from: moves.reduce((a, m) => Math.min(a, m.ts), Infinity) });
+    }
     // `added` counts new trades, which is what the toast is about. `changed` is the wider
     // question the screen cares about: a resting block that grew a leg adds no row but moves the
     // P&L on one, and a poll that reports no change leaves every figure on the page stale.
@@ -6219,12 +6266,29 @@ if (typeof module !== 'undefined') module.exports = AN;
     // attempted, and a refusal or anything unexpected costs nothing but the balance backfill.
     const ledger = await hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null);
 
+    // A dex that reports the same margin summary as one already counted is not a second margin
+    // account — it is the same one answering again. `userFills` does exactly that, and there is no
+    // reason to assume the state is scoped just because its sibling is asked the same way: on a
+    // venue running one margin pool across its dexes, summing turns the balance into twice the
+    // balance. Two genuinely separate dexes agreeing to the last decimal on equity, margin and
+    // withdrawable at the same instant is not a thing that happens; both being empty is, and
+    // counting nothing once is still nothing.
+    const counted = [], seenState = new Set();
+    for (const p of per) {
+      if (!p.st) { counted.push(p); continue; }
+      const m = p.st.marginSummary || {};
+      const k = `${m.accountValue}|${m.totalMarginUsed}|${p.st.withdrawable}`;
+      if (seenState.has(k)) continue;
+      seenState.add(k);
+      counted.push(p);
+    }
+
     // Each dex carries its own equity and its own margin, so the account is their sum. Adding a
     // null to a number would read as zero, so a dex that did not answer leaves the total unknown
     // rather than quietly shrinking it.
     const tally = pick => {
       let sum = 0, seen = false;
-      for (const { st } of per) {
+      for (const { st } of counted) {
         const v = lqNum(pick(st));
         if (v == null || !lqSane(v)) { if (st) return null; continue; }
         sum += v; seen = true;
@@ -6239,8 +6303,16 @@ if (typeof module !== 'undefined') module.exports = AN;
       username: null,
     };
 
-    const positions = [];
-    for (const { dex, st } of per) positions.push(...mapHlPositions(st, dex));
+    // assetPositions is scoped to the dex asked, which is the whole reason each one is asked. If
+    // it ever stops being, one account still cannot hold two positions on the same symbol.
+    const positions = [], seenPos = new Set();
+    for (const { dex, st } of per) {
+      for (const q of mapHlPositions(st, dex)) {
+        if (seenPos.has(q.symbol)) continue;
+        seenPos.add(q.symbol);
+        positions.push(q);
+      }
+    }
     // `clearinghouseState` answers for the dex it is asked about — that is the whole reason every
     // dex is asked. `userFills` does not: it answers for the account however it is asked, so each
     // dex hands back the same fills and asking two returns every one of them twice. Folding merges

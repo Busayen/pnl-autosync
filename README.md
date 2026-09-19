@@ -205,6 +205,16 @@ continues rather than being replaced.
 
 A ledger row of a kind it does not recognise is left out rather than guessed at.
 
+Beneath the line the same balance is worked out a second way, from first principles: what went in
+and out, what trading settled, and what the open positions are worth right now. Every term is
+something the venue has already said, so the derivation owes nothing to the figure it is checking —
+which is the whole point. A balance read straight off the account has nothing to disagree with it,
+and can therefore be wrong for weeks; two arithmetic bugs reached the screen exactly that way. The
+two will not match to the cent, because the derivation leaves funding out deliberately: a perps
+account pays or collects it continuously and it is not itemised here. That slow drift is the
+funding. A gap wider than funding can explain is called out rather than shown quietly, because at
+that point one of the two figures is wrong.
+
 Sampling is deliberately sparse: roughly one point every five minutes, because a fifteen-second
 poll would be 5,760 a day and browser storage is not large. A jump is kept whatever the clock says,
 so a deposit or a position closing shows at full size rather than being smoothed away. Past about
@@ -247,11 +257,18 @@ builder dex used to show only the SOXL: not a display gap but two thirds of the 
 fills, and their share of the balance never arriving.
 
 The two questions do not behave alike, though. `clearinghouseState` answers for the dex it is asked
-about, which is why each has to be asked. `userFills` answers for the whole account however it is
-asked — so asking two dexes hands back every fill twice. Because fills of one order are folded into
+about in its *positions*, which is why each has to be asked. `userFills` answers for the whole
+account however it is asked — so asking two dexes hands back every fill twice. Because fills of one order are folded into
 that order, a duplicate never appears as an extra trade; it appears as one trade of twice the size,
 for twice the money, with twice the fee. Fills are therefore deduplicated by `tid` before anything
 is folded, and a row already saved at twice its size is put right by the next sync.
+
+The margin summary is treated the same way. A venue running one margin pool across its dexes
+answers with the same equity however it is asked, and adding those together is adding the balance
+to itself. So a dex whose equity, margin and free balance match one already counted is taken to be
+that same account answering again, not a second one. Two separate dexes agreeing to the last
+decimal on all three at the same instant is not something that happens; both being empty is, and
+counting nothing once is still nothing.
 
 The address is public on-chain data, but it names whoever holds the page, so it is stripped from
 snapshots and backups along with the tokens.

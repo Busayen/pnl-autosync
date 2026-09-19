@@ -1523,6 +1523,18 @@ const HL_STATE = {
     { type: 'oneWay', position: { coin: 'BTC', szi: '0', entryPx: '0' } },
   ],
 };
+// What a venue running one margin pool across its dexes answers: the same margin summary however
+// it is asked, with only the positions scoped. Adding those together is adding the balance to
+// itself — the same mistake as counting a fill once per dex, one field over.
+const HL_UNIFIED = {
+  marginSummary: { accountValue: '235.65', totalMarginUsed: '150.59' },
+  withdrawable: '59.93',
+  assetPositions: [
+    { type: 'oneWay', position: { coin: 'xyz:CL', szi: '7.787', entryPx: '95.273', unrealizedPnl: '-0.17',
+      leverage: { type: 'isolated', value: 20 }, liquidationPx: '92.82', marginUsed: '36.95' } },
+  ],
+};
+
 async function hyperliquidDirect(browser) {
   state = { orders: [], positions: [] };
   const { page, errs } = await openPage(browser);
@@ -1532,7 +1544,8 @@ async function hyperliquidDirect(browser) {
     seen.push(body);
     if (state.hlDown) return route.fulfill({ status: 500, body: 'upstream down' });
     const fills = body.type === 'userFills';
-    const pick = fills ? HL_ACCOUNT_FILLS : body.dex === 'xyz' ? HL_STATE : HL_MAIN;
+    const pick = fills ? HL_ACCOUNT_FILLS
+      : state.unified ? HL_UNIFIED : body.dex === 'xyz' ? HL_STATE : HL_MAIN;
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(pick) });
   });
   await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('ledger:v4'));
@@ -1631,6 +1644,23 @@ async function hyperliquidDirect(browser) {
     healed.length === 1 && Math.abs(healed[0].pnl - (-4.699352 - 0.60111)) < 1e-9,
     healed.length ? String(healed[0].pnl) : '—');
 
+  // Asking two dexes and being told the same thing twice must not read as twice the money. The
+  // balance is the one number on the page with nothing to check it against, so it is the one that
+  // can be wrong for weeks — and there is no reason to assume the state is scoped when `userFills`
+  // asked the same way is not.
+  state.unified = true;
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(8000);
+  const one = await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq || {}));
+  check('a dex that answers with the same margin summary is not a second margin account',
+    Number((one.account || {}).account_value) === 235.65, JSON.stringify(one.account));
+  check('nor does its margin count twice',
+    Number((one.account || {}).margin_used) === 150.59, JSON.stringify(one.account));
+  check('nor what is free', Number((one.account || {}).available_balance) === 59.93,
+    JSON.stringify(one.account));
+  check('and the position it holds is held once',
+    (one.positions || []).length === 1, JSON.stringify((one.positions || []).map(p => p.symbol)));
+
   // a browser refused by CORS, or an upstream that falls over, must say so rather than look fine
   state.hlDown = true;
   await page.waitForTimeout(8000);
@@ -1638,7 +1668,7 @@ async function hyperliquidDirect(browser) {
     /error/i.test(await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || '')),
     await page.evaluate(() => (document.querySelector('#open .live') || {}).innerText || ''));
   check('and what it already read is kept',
-    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 3);
+    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.positions || []).length)) === 1);
   check('no page errors reading Hyperliquid', errs.length === 0, errs.slice(0, 2).join(' | '));
   await page.context().close();
 }
@@ -2507,6 +2537,34 @@ async function balanceBackfill(browser) {
   check('a deposit steps the line by what was deposited',
     bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] - 23.24) < 1e-6),
     JSON.stringify(bal.map(p => p[1])));
+
+  // Money in and out is kept as a running total so the balance can be worked out from first
+  // principles and checked against the one the venue reports. A balance read straight off the
+  // venue cannot be checked at all, which is how two arithmetic bugs reached the screen.
+  check('what went in and out is kept, and only what is money in or out',
+    !!a.flow && Math.abs(a.flow.in - 23.583998) < 1e-9 && Math.abs(a.flow.out - 0.1) < 1e-9
+    && a.flow.n === 3, JSON.stringify(a.flow));
+  const noteOf = () => page.$eval('#lqbal-note', n => n.innerText.replace(/\s+/g, ' '));
+  // 23.583998 in − 0.10 out + (4 − 0.5) + (−2 − 0.25) settled + 14.20 open
+  check('the balance is also worked out from history and what is open',
+    /\$38\.93/.test(await noteOf()), await noteOf());
+  check('and a reported balance that history cannot account for is called out',
+    /more than funding explains/.test(await noteOf())
+    && (await page.$eval('#lqbal-note .bal-check', n => n.className)).includes('off'),
+    await noteOf());
+
+  // the ordinary case: the two agree to within what funding moves, and it says so rather than
+  // crying wolf on every poll
+  state.lqEquity = '38.70';
+  await page.waitForTimeout(7000);
+  check('two figures that agree are reported as agreeing',
+    /Funding is the difference/.test(await noteOf()), await noteOf());
+  check('and the gap is the difference between them',
+    /[−-]\$0\.23/.test(await noteOf()), await noteOf());
+  check('and it stops shouting once they do',
+    !(await page.$eval('#lqbal-note .bal-check', n => n.className)).includes('off'),
+    await page.$eval('#lqbal-note .bal-check', n => n.className));
+  state.lqEquity = '100';
   check('a fill steps it by the fill, net of its fee',
     bal.some((p, i) => i && Math.abs(p[1] - bal[i - 1][1] - 3.5) < 1e-6));
   check('a send out steps it down',
