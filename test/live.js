@@ -1535,6 +1535,25 @@ const HL_UNIFIED = {
   ],
 };
 
+// Perps margin is not everything the account holds. These shapes are written from Hyperliquid's
+// documentation rather than read off the live endpoint, which is exactly why they are pinned here.
+const HL_SPOT = { balances: [
+  { coin: 'USDC', token: 0, hold: '0.0', total: '12.5', entryNtl: '0.0' },
+  { coin: 'HYPE', token: 1, hold: '0.0', total: '2.0', entryNtl: '70.0' },
+  // a dust row that rounds to nothing must not become a phantom holding
+  { coin: 'PURR', token: 2, hold: '0.0', total: '0', entryNtl: '0.0' },
+] };
+// universe[i].tokens are positions in `tokens`, and ctxs[i] is that pair's context
+const HL_SPOT_META = [
+  { tokens: [{ name: 'USDC', index: 0 }, { name: 'HYPE', index: 1 }, { name: 'PURR', index: 2 }],
+    universe: [{ tokens: [1, 0], name: '@107', index: 0 },
+               // a pair not quoted in USDC prices nothing, and must not be read as if it did
+               { tokens: [2, 1], name: '@9', index: 1 }] },
+  [{ midPx: '40.0', markPx: '40.0', coin: '@107' }, { midPx: '0.5', markPx: '0.5', coin: '@9' }],
+];
+const HL_STAKE = { delegated: '3.0', undelegated: '1.0', totalPendingWithdrawal: '0.5',
+                   nPendingWithdrawals: 1 };
+
 async function hyperliquidDirect(browser) {
   state = { orders: [], positions: [] };
   const { page, errs } = await openPage(browser);
@@ -1543,6 +1562,13 @@ async function hyperliquidDirect(browser) {
     const body = JSON.parse(route.request().postData() || '{}');
     seen.push(body);
     if (state.hlDown) return route.fulfill({ status: 500, body: 'upstream down' });
+    const other = { spotClearinghouseState: state.noSpot ? null : HL_SPOT,
+                    spotMetaAndAssetCtxs: state.noMeta ? null : HL_SPOT_META,
+                    delegatorSummary: HL_STAKE, userNonFundingLedgerUpdates: [] };
+    if (Object.prototype.hasOwnProperty.call(other, body.type)) {
+      return route.fulfill({ status: 200, contentType: 'application/json',
+                             body: JSON.stringify(other[body.type]) });
+    }
     const fills = body.type === 'userFills';
     const pick = fills ? HL_ACCOUNT_FILLS
       : state.unified ? HL_UNIFIED : body.dex === 'xyz' ? HL_STATE : HL_MAIN;
@@ -1563,7 +1589,9 @@ async function hyperliquidDirect(browser) {
     && seen.filter(b => b.type === 'userFills').length === 2,
     JSON.stringify(seen.map(b => `${b.type}:${b.dex || 'main'}`)));
   check('each carries the wallet address',
-    seen.every(b => b.user === '0x1111111111111111111111111111111111111111'), JSON.stringify(seen[0]));
+    // the spot metadata is about the venue rather than about anyone, so it names no wallet
+    seen.every(b => b.user == null || b.user === '0x1111111111111111111111111111111111111111')
+    && seen.some(b => b.user), JSON.stringify(seen[0]));
   // Positions and fills are the builder dex's and need naming as such. Money in and out is the
   // account's — the same USDC whichever dex it was traded on — so that one is asked account-wide.
   check('the builder dex is named when it is the one being asked about',
@@ -1643,6 +1671,45 @@ async function hyperliquidDirect(browser) {
   check('and so is the money on it',
     healed.length === 1 && Math.abs(healed[0].pnl - (-4.699352 - 0.60111)) < 1e-9,
     healed.length ? String(healed[0].pnl) : '—');
+
+  // Perps margin is what you can lose on a perp, not what you have. A token in spot and a staked
+  // coin are both money the account holds and neither appears anywhere in clearinghouseState, so a
+  // balance built from that alone is not the account's worth — it is one pot of it.
+  check('spot is valued at what the pairs quoted in dollars say',
+    Number(acc.spot_value) === 92.5, JSON.stringify(acc.spot_value));   // 12.5 USDC + 2 HYPE @ 40
+  check('a pair not quoted in dollars prices nothing',
+    !(acc.spot_held || []).some(h => h.coin === 'PURR'), JSON.stringify(acc.spot_held));
+  check('staked, unstaking and undelegated are all still yours',
+    Number(acc.staked_qty) === 4.5 && Number(acc.staked_value) === 180,
+    JSON.stringify([acc.staked_qty, acc.staked_value]));
+  check('and net worth is every pot added up',
+    Number(acc.net_worth) === 122.62 + 92.5 + 180, JSON.stringify(acc.net_worth));
+  check('while the trading pot stays separately knowable',
+    Number(acc.trading) === 122.62, JSON.stringify(acc.trading));
+  check('the balance line follows net worth, not the margin account',
+    (await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.bal || []).slice(-1)[0] || []))[1]
+      === 395.12, JSON.stringify(await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq.bal || []).slice(-1))));
+
+  // A balance that silently drops what it cannot see is worse than one that admits it: counting an
+  // unpriceable holding as nothing reports a smaller account as confidently as a correct one.
+  state.noMeta = true;
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForTimeout(8000);
+  const blind = await page.evaluate(() => (JSON.parse(localStorage.getItem('ledger:v4')).lq || {}).account || {});
+  check('a holding nothing can price leaves net worth unknown rather than understated',
+    blind.net_worth == null && blind.spot_value == null, JSON.stringify(blind.net_worth));
+  check('and names what it could not price', (blind.spot_unpriced || []).some(u => u.coin === 'HYPE'),
+    JSON.stringify(blind.spot_unpriced));
+  await page.evaluate(() => document.querySelector('[data-section="overview"]').click());
+  await page.waitForTimeout(400);
+  const sub = await page.$eval('#lqbal-sub', n => n.textContent);
+  check('the line falls back to the pot it does know, and says which',
+    /122\.62 trading/.test(sub) && /unpriced/.test(sub), sub);
+  check('staked HYPE with no price is still reported as a quantity',
+    /4\.5 HYPE staked, unpriced/.test(sub), sub);
+  state.noMeta = false;
+  await page.evaluate(() => document.querySelector('[data-section="open"]').click());
+  await page.waitForTimeout(300);
 
   // Asking two dexes and being told the same thing twice must not read as twice the money. The
   // balance is the one number on the page with nothing to check it against, so it is the one that

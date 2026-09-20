@@ -2407,7 +2407,7 @@ if (typeof module !== 'undefined') module.exports = AN;
   const C = CORE;
   // Shown in Settings and on the brand, so "is the version online the right one?" is answerable
   // from the page itself rather than by reading a commit log.
-  const APP_VERSION = 'v9.18.0';
+  const APP_VERSION = 'v9.19.0';
   const $ = s => document.querySelector(s), $$ = s => Array.from(document.querySelectorAll(s));
   { const b = document.getElementById('brand'); if (b) b.title = `Ledger ${APP_VERSION}`; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2707,7 +2707,11 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (!rows) return null;
     const open = (lq.positions || []).reduce((a, p) => a + (isFinite(p.pnl) ? p.pnl : 0), 0);
     const acc = lq.account || null;
-    const said = acc ? lqNum(acc.account_value != null ? acc.account_value : acc.equity) : null;
+    // Deliberately the trading pot and not net worth: history reconstructs what was traded, and
+    // spot and staking are not in it. Checking it against the larger figure would show every
+    // staked coin as an error.
+    const said = acc ? lqNum(acc.trading != null ? acc.trading
+      : acc.account_value != null ? acc.account_value : acc.equity) : null;
     const value = lqTrim(flow.in - flow.out + realised + open);
     return { value, in: flow.in, out: flow.out, realised, open, said,
              gap: said == null ? null : lqTrim(said - value), from: flow.from };
@@ -2717,11 +2721,24 @@ if (typeof module !== 'undefined') module.exports = AN;
     if (S.venue !== 'liquid' || !$('#lqbal-card')) return;
     const bal = (S.lq && Array.isArray(S.lq.bal) ? S.lq.bal : []).filter(p => Array.isArray(p) && isFinite(p[1]));
     const acc = (S.lq && S.lq.account) || null;
-    const now = acc ? lqNum(acc.account_value != null ? acc.account_value : acc.equity) : null;
+    const trading = acc ? lqNum(acc.trading != null ? acc.trading
+      : acc.account_value != null ? acc.account_value : acc.equity) : null;
+    const now = acc && acc.net_worth != null ? lqNum(acc.net_worth) : trading;
     const used = acc ? lqNum(acc.margin_used) : null, free = acc ? lqNum(acc.available_balance) : null;
-    $('#lqbal-sub').textContent = used != null || free != null
-      ? `${used != null ? `${moneyIn(used, 'USD')} in margin` : ''}${used != null && free != null ? ' · ' : ''}${free != null ? `${moneyIn(free, 'USD')} free` : ''}`
-      : '';
+    // Every pot that holds something is named. One holding nothing is left out rather than
+    // printed as a zero, and one that could not be priced says so instead of vanishing.
+    const spotV = acc ? lqNum(acc.spot_value) : null, stakeV = acc ? lqNum(acc.staked_value) : null;
+    const stakeQ = acc ? lqNum(acc.staked_qty) : null;
+    const bits = [];
+    if (trading != null) bits.push(`${moneyIn(trading, 'USD')} trading`);
+    if (spotV) bits.push(`${moneyIn(spotV, 'USD')} spot`);
+    if (stakeV) bits.push(`${moneyIn(stakeV, 'USD')} staked`);
+    else if (stakeQ) bits.push(`${lqTrim(stakeQ)} HYPE staked, unpriced`);
+    if (acc && acc.spot_value == null && (acc.spot_unpriced || []).length)
+      bits.push(`spot holds ${acc.spot_unpriced.map(u => `${u.qty} ${u.coin}`).join(', ')}, unpriced`);
+    if (used != null) bits.push(`${moneyIn(used, 'USD')} in margin`);
+    if (free != null) bits.push(`${moneyIn(free, 'USD')} free`);
+    $('#lqbal-sub').textContent = bits.join(' · ');
     const first = bal.length ? bal[0][1] : null;
     const move = first != null && now != null ? now - first : null;
     $('#lqbal-meta').innerHTML = now == null ? ''
@@ -2742,8 +2759,8 @@ if (typeof module !== 'undefined') module.exports = AN;
     const d = derivedBalance();
     const off = d && d.gap != null && Math.abs(d.gap) > Math.max(1, Math.abs(d.value) * 0.05);
     if (note) note.innerHTML = esc(how) + (!d ? '' :
-      `<div class="bal-check${off ? ' off' : ''}">Worked out from what went in and out, what trading`
-      + ` settled, and what is open right now: <b>${esc(moneyIn(d.value, 'USD'))}</b>`
+      `<div class="bal-check${off ? ' off' : ''}">The trading balance worked out from what went in`
+      + ` and out, what trading settled, and what is open right now: <b>${esc(moneyIn(d.value, 'USD'))}</b>`
       + (d.said == null ? '' : ` against <b>${esc(moneyIn(d.said, 'USD'))}</b> reported`
         + ` — ${esc(signed(d.gap))} apart${off ? ', which is more than funding explains'
         : '. Funding is the difference'}.`) + '</div>');
@@ -6081,7 +6098,8 @@ if (typeof module !== 'undefined') module.exports = AN;
   const BAL_MIN = 5 * 60 * 1000, BAL_MAX = 1500;
   function recordBalance(account) {
     if (!account) return;
-    const v = lqNum(account.account_value != null ? account.account_value : account.equity);
+    const v = lqNum(account.net_worth != null ? account.net_worth
+      : account.account_value != null ? account.account_value : account.equity);
     if (v == null || !lqSane(v)) return;
     S.lq.bal = Array.isArray(S.lq.bal) ? S.lq.bal : [];
     const bal = S.lq.bal, last = bal[bal.length - 1], now = Date.now();
@@ -6247,6 +6265,55 @@ if (typeof module !== 'undefined') module.exports = AN;
     return [...new Set(['', ...named])];               // '' is the main perp dex, always included
   };
 
+  // Spot pairs are quoted against a token, not against dollars, so only the ones quoted in USDC
+  // give a price that can be added to a balance. USDC is a dollar by definition; a stablecoin with
+  // no pair is taken at par rather than dropped, which is the smaller of the two errors.
+  const LQ_STABLE = /^(USDC|USDH|USDT|USDE)$/i;
+  function hlSpotPrices(ctx) {
+    const out = new Map([['USDC', 1]]);
+    if (!Array.isArray(ctx) || ctx.length < 2) return out;
+    const meta = ctx[0] || {}, ctxs = Array.isArray(ctx[1]) ? ctx[1] : [];
+    const tokens = meta.tokens || [], universe = meta.universe || [];
+    universe.forEach((u, i) => {
+      const pair = (u && u.tokens) || [];
+      const base = tokens[pair[0]], quote = tokens[pair[1]];
+      const mid = lqNum((ctxs[i] || {}).midPx);
+      if (!base || !quote || !/^USDC$/i.test(String(quote.name || ''))) return;
+      if (mid == null || !lqSane(mid) || mid <= 0) return;
+      const name = String(base.name || '');
+      if (name && !out.has(name)) out.set(name, mid);
+    });
+    return out;
+  }
+
+  // What the spot wallet is worth. A token nothing could price is not guessed at and not counted
+  // as zero: it is named, and the total goes unknown so the page can say so.
+  function hlSpotValue(st, prices) {
+    if (!st) return null;
+    const rows = Array.isArray(st.balances) ? st.balances : [];
+    let usd = 0; const held = [], unpriced = [];
+    for (const b of rows) {
+      const coin = String((b && b.coin) || '');
+      const qty = lqNum(b && (b.total != null ? b.total : b.hold));
+      if (!coin || qty == null || !lqSane(qty) || qty === 0) continue;
+      const px = prices.has(coin) ? prices.get(coin) : LQ_STABLE.test(coin) ? 1 : null;
+      if (px == null) { unpriced.push({ coin, qty: lqTrim(qty) }); continue; }
+      usd += qty * px;
+      held.push({ coin, qty: lqTrim(qty), usd: lqTrim(qty * px) });
+    }
+    return { usd: unpriced.length ? null : lqTrim(usd), held, unpriced };
+  }
+
+  // Staked HYPE, including what is mid-unstake: locked, unreachable, and still yours.
+  function hlStakeValue(sum, prices) {
+    if (!sum) return null;
+    const add = v => { const n = lqNum(v); return n != null && lqSane(n) ? n : 0; };
+    const qty = add(sum.delegated) + add(sum.undelegated) + add(sum.totalPendingWithdrawal);
+    if (!qty) return { qty: 0, usd: 0 };
+    const px = prices.has('HYPE') ? prices.get('HYPE') : null;
+    return { qty: lqTrim(qty), usd: px == null ? null : lqTrim(qty * px) };
+  }
+
   async function fetchHyperliquid(user, dexCfg) {
     const dexes = lqDexes(dexCfg);
     const per = await Promise.all(dexes.map(async dex => {
@@ -6261,10 +6328,20 @@ if (typeof module !== 'undefined') module.exports = AN;
     // answered for none of them means the endpoint is unreachable and that is worth saying.
     if (per.every(p => !p.st && !p.fills)) throw new Error('Hyperliquid did not answer.');
 
-    // Money in and out is the account's, not a dex's, so it is asked once and without a prefix.
-    // Unlike the two above, this shape has not been read from the live endpoint — so it is
-    // attempted, and a refusal or anything unexpected costs nothing but the balance backfill.
-    const ledger = await hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null);
+    // None of these belong to a dex, so they are asked once and without a prefix. Perps margin is
+    // not everything the account holds: a token sitting in spot is money you have and cannot lose
+    // on a perp, and staked HYPE is money you have and cannot trade at all. Neither appears
+    // anywhere in clearinghouseState. Unlike the two above, these shapes have not been read from
+    // the live endpoint — so each is attempted on its own and a refusal costs only its own line.
+    const [ledger, spotSt, spotCtx, stakeSt] = await Promise.all([
+      hlPost({ type: 'userNonFundingLedgerUpdates', user }).catch(() => null),
+      hlPost({ type: 'spotClearinghouseState', user }).catch(() => null),
+      hlPost({ type: 'spotMetaAndAssetCtxs' }).catch(() => null),
+      hlPost({ type: 'delegatorSummary', user }).catch(() => null),
+    ]);
+    const prices = hlSpotPrices(spotCtx);
+    const spot = hlSpotValue(spotSt, prices);
+    const staked = hlStakeValue(stakeSt, prices);
 
     // A dex that reports the same margin summary as one already counted is not a second margin
     // account — it is the same one answering again. `userFills` does exactly that, and there is no
@@ -6295,11 +6372,22 @@ if (typeof module !== 'undefined') module.exports = AN;
       }
       return seen ? lqTrim(sum) : null;
     };
+    const trading = tally(st => st && st.marginSummary && st.marginSummary.accountValue);
+    // Net worth is every pot added up. A pot that did not answer, or that holds something nothing
+    // could put a price on, leaves the total unknown rather than quietly counting as nothing —
+    // a balance that silently drops what it cannot see is worse than one that admits it.
+    const parts = [trading, spot && spot.usd, staked && staked.usd];
+    const netWorth = parts.some(v => v == null) ? null
+      : lqTrim(parts.reduce((a, v) => a + v, 0));
     const account = {
-      equity: tally(st => st && st.marginSummary && st.marginSummary.accountValue),
-      account_value: tally(st => st && st.marginSummary && st.marginSummary.accountValue),
+      equity: trading,
+      account_value: trading,
       margin_used: tally(st => st && st.marginSummary && st.marginSummary.totalMarginUsed),
       available_balance: tally(st => st && st.withdrawable),
+      trading, net_worth: netWorth,
+      spot_value: spot && spot.usd, spot_held: (spot && spot.held) || [],
+      spot_unpriced: (spot && spot.unpriced) || [],
+      staked_value: staked && staked.usd, staked_qty: staked && staked.qty,
       username: null,
     };
 

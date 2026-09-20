@@ -190,7 +190,20 @@ the same; the pixels are not guaranteed bit-for-bit.
 
 The venue answers with what the balance is now and never with what it was, so the only history that
 exists is the one this page keeps. **Overview** on the Liquid book carries a balance line, sampled
-from the account as it is read, with what is in margin against what is free.
+from the account as it is read.
+
+The figure is **net worth, not margin equity**. Perps margin is what can be lost on a perp, which
+is not the same as what the account holds: a token sitting in spot is money you have and cannot
+lose on a perp, and staked HYPE — delegated, undelegated, or part-way through the seven-day
+unstaking queue — is money you have and cannot trade at all. Neither appears anywhere in
+`clearinghouseState`, so each is asked for separately and added. The line beneath names every pot
+that holds something; a pot holding nothing is left out rather than printed as a zero.
+
+Spot is valued through pairs quoted in USDC, since a pair quoted in anything else prices nothing in
+dollars. Where a holding cannot be priced, net worth goes **unknown** and the holding is named,
+rather than being counted as zero — a balance that silently drops what it cannot see reports a
+smaller account just as confidently as a correct one. The trading pot stays separately knowable, so
+the line falls back to it and says that is what it is showing.
 
 Before it started watching, the line is reconstructed rather than absent. Every fill and every
 transfer is a known change to the balance, so walking those backwards from the first real reading
@@ -205,8 +218,10 @@ continues rather than being replaced.
 
 A ledger row of a kind it does not recognise is left out rather than guessed at.
 
-Beneath the line the same balance is worked out a second way, from first principles: what went in
-and out, what trading settled, and what the open positions are worth right now. Every term is
+Beneath the line the trading pot — not net worth — is worked out a second way, from first
+principles: what went in and out, what trading settled, and what the open positions are worth right
+now. Deliberately the trading pot, because that is what the history reconstructs; checking it
+against net worth would report every staked coin as an error. Every term is
 something the venue has already said, so the derivation owes nothing to the figure it is checking —
 which is the whole point. A balance read straight off the account has nothing to disagree with it,
 and can therefore be wrong for weeks; two arithmetic bugs reached the screen exactly that way. The
